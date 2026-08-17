@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="omelette-print-source" content="v1786654448208800 GNPlay Createur.dc.html">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="./doc-page.js"></script>
+<style>
+  doc-page:not(:defined){visibility:hidden}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  *{animation-delay:-99s !important;animation-duration:.001s !important;animation-iteration-count:1 !important;animation-fill-mode:both !important;animation-play-state:running !important;transition-duration:0s !important}
+  body{margin:0;font-family:Inter,system-ui,sans-serif}
+  a{color:#F5A623;text-decoration:none}
+  a:hover{color:#FFCB6B}
+</style>
+</helmet>
+
+<doc-page size="letter">
+  <sc-for list="{{ pages }}" as="p" hint-placeholder-count="29">
+    <section class="page" id="p{{ p.n }}" data-screen-label="{{ p.n }}" style="background:#0B0B0D;display:flex;flex-direction:column;align-items:center;padding:30px 0 0;box-sizing:border-box">
+      <div style="width:390px;display:flex;align-items:baseline;justify-content:space-between;padding-bottom:16px;border-bottom:1px solid #2C2C33;margin-bottom:20px">
+        <span style="font-family:Sora,sans-serif;font-weight:800;font-size:15px;color:#fff;letter-spacing:.02em">{{ p.title }}</span>
+        <span style="font-family:Sora,sans-serif;font-weight:700;font-size:11px;color:#F5A623;letter-spacing:.1em">{{ p.side }} · {{ p.n }}</span>
+      </div>
+      <dc-import name="GNPlay Createur" screen="{{ p.key }}" chrome="{{ false }}" hint-size="390px,844px"></dc-import>
+      <div style="width:390px;padding-top:14px;font-size:10px;color:#4a4a52;display:flex;justify-content:space-between">
+        <span>GNPlay · prototype</span>
+        <span>août 2026</span>
+      </div>
+    </section>
+  </sc-for>
+</doc-page>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const creator = [
+      ['01', 'Connexion', 'login'], ['02', 'Inscription · vérification', 'signup'], ['03', 'Devenir créateur', 'become'],
+      ['04', 'Tableau de bord', 'dash'], ['05', 'Mon contenu — vidéos', 'videos'], ['06', 'Détail d\u2019une série', 'series'],
+      ['07', 'Détail vidéo', 'detail'], ['08', 'Statistiques', 'stats'], ['09', 'Nouvel envoi', 'upload'],
+      ['10', 'Portefeuille', 'wallet'], ['11', 'Demande de retrait', 'payout'], ['12', 'Suivi du retrait', 'payoutDetail'],
+      ['13', 'Profil', 'profile'], ['14', 'Appareils connectés', 'devices'], ['15', 'Notifications', 'notifs'],
+      ['16', 'Réglages & sécurité', 'settings']
+    ];
+    const viewer = [
+      ['17', 'Catalogue', 'catalog'], ['18', 'Recherche', 'search'], ['19', 'Fiche vidéo', 'watch'],
+      ['20', 'Fiche série', 'seriesView'], ['21', 'Chaîne créateur', 'channel'], ['22', 'Paiement', 'pay'],
+      ['23', 'Lecteur', 'player'], ['24', 'Ma bibliothèque', 'library'], ['25', 'Mes abonnements', 'subs'],
+      ['26', 'Solde & achats', 'purchases'], ['27', 'Recharger', 'topup'], ['28', 'Notifications', 'vnotifs'],
+      ['29', 'Profil spectateur', 'vprofile']
+    ];
+    const map = (arr, side) => arr.map(([n, title, key]) => ({ n, title, key, side }));
+    return { pages: map(creator, 'CRÉATEUR').concat(map(viewer, 'SPECTATEUR')) };
+  }
+}
+
+</script>
+</body>
+</html>

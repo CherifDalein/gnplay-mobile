@@ -1,0 +1,19 @@
+<!-- @dsCard group="Components" viewport="700x210" name="Card & StatTile" -->
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<div id="root" style="background:#0B0B0D;padding:20px"></div>
+<script type="text/babel">
+const { Card, StatTile } = window.GNPlayDesignSystem_da67c1;
+function Demo() {
+  return (
+    <div style={{ display: 'flex', gap: 12, fontFamily: 'Inter,sans-serif' }}>
+      <Card style={{ flex: 1 }}><div style={{ color: '#fff', fontSize: 13 }}>Ligne de liste</div></Card>
+      <div style={{ flex: 1 }}><StatTile value="14 208" label="Vues" /></div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>

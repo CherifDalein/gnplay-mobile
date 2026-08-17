@@ -1,0 +1,11 @@
+:root{
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
+  --space-5:20px; --space-6:24px; --space-7:32px; --space-8:40px;
+
+  --radius-sm:9px; --radius-md:12px; --radius-lg:16px; --radius-xl:20px; --radius-pill:999px;
+  --radius-phone:46px;
+
+  --shadow-card:0 12px 30px rgba(0,0,0,.5);
+  --shadow-fab:0 8px 20px rgba(196,24,63,.45);
+  --shadow-phone:0 40px 90px rgba(0,0,0,.6), 0 0 0 10px #131316;
+}

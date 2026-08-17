@@ -1,0 +1,39 @@
+:root{
+  --bg-app:#0B0B0D;
+  --bg-app-gradient:radial-gradient(1200px 700px at 20% -10%, #1A0712 0%, #0B0B0D 60%);
+  --surface-1:#16161A;
+  --surface-2:#111116;
+  --surface-3:#1f1f25;
+  --border-1:#2C2C33;
+  --border-2:#202026;
+
+  --brand-950:#1A0712;
+  --brand-900:#2A0E1F;
+  --brand-800:#5C1330;
+  --brand-700:#8A1436;
+  --brand-600:#A8123B;
+  --brand-500:#C4183F;
+
+  --accent-500:#F5A623;
+  --accent-600:#D98A0E;
+  --accent-300:#FFCB6B;
+
+  --text-1:#FFFFFF;
+  --text-2:#B6B6C0;
+  --text-3:#6E6E78;
+  --text-4:#4A4A52;
+  --text-inverse:#1A0712;
+
+  --success:#2FAE60;
+  --success-bg:rgba(47,174,96,.14);
+  --warning:#E8B23D;
+  --warning-bg:rgba(232,178,61,.1);
+  --danger:#FF5A5F;
+  --danger-bg:rgba(255,90,95,.1);
+  --info:#3B82F6;
+  --info-bg:rgba(59,130,246,.14);
+
+  --gradient-brand:linear-gradient(135deg,#2A0E1F 0%,#5C1330 50%,#C4183F 130%); /* @kind color */
+  --gradient-brand-soft:linear-gradient(140deg,#2A0E1F,#8A1436); /* @kind color */
+  --gradient-cta:linear-gradient(90deg,#A8123B,#F5A623); /* @kind color */
+}

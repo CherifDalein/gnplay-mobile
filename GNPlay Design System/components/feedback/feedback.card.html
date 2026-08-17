@@ -1,0 +1,22 @@
+<!-- @dsCard group="Components" viewport="700x120" name="Status pills" -->
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<div id="root" style="background:#0B0B0D;padding:20px"></div>
+<script type="text/babel">
+const { StatusPill } = window.GNPlayDesignSystem_da67c1;
+function Demo() {
+  return (
+    <div style={{ display: 'flex', gap: 10, fontFamily: 'Inter,sans-serif' }}>
+      <StatusPill tone="success">Publiée</StatusPill>
+      <StatusPill tone="warning">En traitement</StatusPill>
+      <StatusPill tone="danger">Échec</StatusPill>
+      <StatusPill tone="neutral">Masquée</StatusPill>
+      <StatusPill tone="brand">CRÉATEUR</StatusPill>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>
