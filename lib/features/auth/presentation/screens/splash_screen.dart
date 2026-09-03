@@ -9,14 +9,14 @@ class SplashScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: AppColors.black,
+      backgroundColor: AppColors.bgApp,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             GnplayLogo(height: 96),
             SizedBox(height: 28),
-            CircularProgressIndicator(color: AppColors.primary),
+            CircularProgressIndicator(color: AppColors.accent500),
           ],
         ),
       ),

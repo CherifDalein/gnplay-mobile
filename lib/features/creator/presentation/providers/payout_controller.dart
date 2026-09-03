@@ -1,27 +1,31 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../domain/payout_request.dart';
 import 'creator_dashboard_provider.dart';
 import 'creator_repository_provider.dart';
 import 'creator_wallet_provider.dart';
+import 'payout_providers.dart';
 
 final payoutControllerProvider =
-    StateNotifierProvider<PayoutController, AsyncValue<void>>((ref) {
+    StateNotifierProvider<PayoutController, AsyncValue<PayoutRequestRecord?>>((
+      ref,
+    ) {
       return PayoutController(ref);
     });
 
-class PayoutController extends StateNotifier<AsyncValue<void>> {
+class PayoutController extends StateNotifier<AsyncValue<PayoutRequestRecord?>> {
   PayoutController(this._ref) : super(const AsyncData(null));
 
   final Ref _ref;
 
-  Future<bool> requestPayout({
+  Future<PayoutRequestRecord?> requestPayout({
     required int amount,
     required String operator,
     String? destinationPhone,
   }) async {
     state = const AsyncLoading();
     try {
-      await _ref
+      final record = await _ref
           .read(creatorRepositoryProvider)
           .requestPayout(
             amount: amount,
@@ -30,11 +34,12 @@ class PayoutController extends StateNotifier<AsyncValue<void>> {
           );
       _ref.invalidate(creatorDashboardProvider);
       _ref.invalidate(creatorWalletLedgerProvider);
-      state = const AsyncData(null);
-      return true;
+      _ref.invalidate(payoutsProvider);
+      state = AsyncData(record);
+      return record;
     } catch (error, stackTrace) {
       state = AsyncError(error, stackTrace);
-      return false;
+      return null;
     }
   }
 }

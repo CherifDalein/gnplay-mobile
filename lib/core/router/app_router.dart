@@ -2,15 +2,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../shared/widgets/shell_scaffold.dart';
 import '../../features/auth/presentation/providers/auth_controller.dart';
+import '../../features/auth/presentation/screens/forgot_password_screen.dart';
 import '../../features/auth/presentation/screens/login_screen.dart';
 import '../../features/auth/presentation/screens/register_screen.dart';
 import '../../features/auth/presentation/screens/splash_screen.dart';
 import '../../features/creator/presentation/screens/become_creator_screen.dart';
+import '../../features/creator/presentation/screens/creator_dashboard_screen.dart';
 import '../../features/earnings/presentation/screens/earnings_screen.dart';
-import '../../features/home/presentation/screens/home_screen.dart';
-import '../../features/publish/presentation/screens/publish_screen.dart';
+import '../../features/earnings/presentation/screens/payout_detail_screen.dart';
+import '../../features/earnings/presentation/screens/payout_request_screen.dart';
+import '../../features/profile/presentation/screens/devices_screen.dart';
+import '../../features/profile/presentation/screens/notifications_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
-import '../../features/series/presentation/screens/series_screen.dart';
+import '../../features/profile/presentation/screens/settings_screen.dart';
+import '../../features/publish/presentation/screens/publish_screen.dart';
 import '../../features/videos/presentation/screens/video_detail_screen.dart';
 import '../../features/videos/presentation/screens/video_stats_screen.dart';
 import '../../features/videos/presentation/screens/videos_screen.dart';
@@ -23,7 +28,12 @@ final routerProvider = Provider<GoRouter>((ref) {
     initialLocation: '/splash',
     redirect: (context, state) {
       final location = Uri.parse(state.location).path;
-      final isAuthRoute = location == '/login' || location == '/register';
+      // Routes réservées aux visiteurs non connectés (redirigent vers /home
+      // si déjà authentifié).
+      final isAuthOnlyRoute = location == '/login' || location == '/register';
+      // Accessible sans être connecté, mais aussi depuis l'app (Réglages) une
+      // fois connecté — ne doit jamais rebondir vers /home.
+      final isPublicRoute = isAuthOnlyRoute || location == '/forgot-password';
 
       if (authState.isLoading) {
         return location == '/splash' ? null : '/splash';
@@ -32,10 +42,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isAuthenticated = authState.valueOrNull != null;
 
       if (!isAuthenticated) {
-        return isAuthRoute ? null : '/login';
+        return isPublicRoute ? null : '/login';
       }
 
-      if (isAuthRoute || location == '/splash') {
+      if (isAuthOnlyRoute || location == '/splash') {
         if (postAuthRedirect != null) {
           Future.microtask(() {
             ref.read(postAuthRedirectProvider.notifier).state = null;
@@ -58,13 +68,33 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const RegisterScreen(),
       ),
       GoRoute(
+        path: '/forgot-password',
+        builder: (context, state) => const ForgotPasswordScreen(),
+      ),
+      GoRoute(
         path: '/become-creator',
         builder: (context, state) => const BecomeCreatorScreen(),
       ),
       GoRoute(
-        path: '/videos/series/:seriesId',
+        path: '/devices',
+        builder: (context, state) => const DevicesScreen(),
+      ),
+      GoRoute(
+        path: '/notifications',
+        builder: (context, state) => const NotificationsScreen(),
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: '/payout',
+        builder: (context, state) => const PayoutRequestScreen(),
+      ),
+      GoRoute(
+        path: '/payout/:payoutId',
         builder: (context, state) =>
-            SeriesScreen(seriesId: state.pathParameters['seriesId']!),
+            PayoutDetailScreen(payoutId: state.pathParameters['payoutId']!),
       ),
       GoRoute(
         path: '/videos/:videoId/stats',
@@ -85,7 +115,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/home',
-                builder: (context, state) => const HomeScreen(),
+                builder: (context, state) => const CreatorDashboardScreen(),
               ),
             ],
           ),

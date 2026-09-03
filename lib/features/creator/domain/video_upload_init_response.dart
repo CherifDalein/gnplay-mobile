@@ -1,31 +1,126 @@
-class VideoUploadInitResponse {
-  const VideoUploadInitResponse(this.raw);
+import '../../../shared/utils/json_helpers.dart';
 
-  final Map<String, dynamic> raw;
+class UploadPartTarget {
+  const UploadPartTarget({required this.partNumber, required this.uploadUrl});
 
-  String? get videoId => _string(raw['video_id']) ?? _string(raw['id']);
+  final int partNumber;
+  final String uploadUrl;
 
-  String? get uploadId => _string(raw['upload_id']) ?? _string(raw['key']);
-
-  String? get uploadUrl {
-    return _string(raw['upload_url']) ??
-        _string(raw['presigned_url']) ??
-        _string(raw['url']);
-  }
-
-  bool get hasUploadTarget => uploadUrl != null;
-
-  factory VideoUploadInitResponse.fromJson(Object? decoded) {
-    if (decoded is Map<String, dynamic>) {
-      return VideoUploadInitResponse(decoded);
-    }
-    return const VideoUploadInitResponse({});
+  factory UploadPartTarget.fromJson(Map<String, dynamic> json) {
+    return UploadPartTarget(
+      partNumber: jsonInt(json['part_number']),
+      uploadUrl: jsonString(json['upload_url'], fallback: ''),
+    );
   }
 }
 
-String? _string(Object? value) {
-  if (value is String && value.trim().isNotEmpty) {
-    return value;
+class VideoUploadInitResponse {
+  const VideoUploadInitResponse({
+    required this.videoId,
+    required this.uploadId,
+    required this.objectKey,
+    required this.chunkSize,
+    required this.totalParts,
+    required this.maxParallelUploads,
+    required this.expiresIn,
+    required this.parts,
+  });
+
+  final String videoId;
+  final String uploadId;
+  final String objectKey;
+  final int chunkSize;
+  final int totalParts;
+  final int maxParallelUploads;
+  final int expiresIn;
+  final List<UploadPartTarget> parts;
+
+  factory VideoUploadInitResponse.fromJson(Map<String, dynamic> json) {
+    final rawParts = json['parts'];
+    return VideoUploadInitResponse(
+      videoId: jsonString(json['video_id'], fallback: ''),
+      uploadId: jsonString(json['upload_id'], fallback: ''),
+      objectKey: jsonString(json['object_key'], fallback: ''),
+      chunkSize: jsonInt(json['chunk_size']),
+      totalParts: jsonInt(json['total_parts']),
+      maxParallelUploads: jsonInt(json['max_parallel_uploads']) == 0
+          ? 3
+          : jsonInt(json['max_parallel_uploads']),
+      expiresIn: jsonInt(json['expires_in']),
+      parts: rawParts is List
+          ? rawParts
+                .whereType<Map<String, dynamic>>()
+                .map(UploadPartTarget.fromJson)
+                .toList()
+          : const [],
+    );
   }
-  return null;
+}
+
+class UploadStatusResponse {
+  const UploadStatusResponse({
+    required this.videoId,
+    required this.status,
+    required this.uploadId,
+    required this.chunkSize,
+    required this.totalParts,
+    required this.uploadedParts,
+    required this.missingParts,
+  });
+
+  final String videoId;
+  final String status;
+  final String uploadId;
+  final int chunkSize;
+  final int totalParts;
+  final List<int> uploadedParts;
+  final List<int> missingParts;
+
+  factory UploadStatusResponse.fromJson(Map<String, dynamic> json) {
+    return UploadStatusResponse(
+      videoId: jsonString(json['video_id'], fallback: ''),
+      status: jsonString(json['status'], fallback: ''),
+      uploadId: jsonString(json['upload_id'], fallback: ''),
+      chunkSize: jsonInt(json['chunk_size']),
+      totalParts: jsonInt(json['total_parts']),
+      uploadedParts: _intList(json['uploaded_parts']),
+      missingParts: _intList(json['missing_parts']),
+    );
+  }
+
+  static List<int> _intList(Object? value) {
+    if (value is List) {
+      return value.map(jsonInt).toList();
+    }
+    return const [];
+  }
+}
+
+class ProcessingStatusResponse {
+  const ProcessingStatusResponse({
+    required this.videoId,
+    required this.status,
+    required this.progress,
+    required this.attempts,
+    this.errorMessage,
+  });
+
+  final String videoId;
+  final String status;
+  final int progress;
+  final int attempts;
+  final String? errorMessage;
+
+  bool get isDone => status == 'completed' || status == 'ready';
+  bool get isFailed => status == 'failed';
+
+  factory ProcessingStatusResponse.fromJson(Map<String, dynamic> json) {
+    return ProcessingStatusResponse(
+      videoId: jsonString(json['video_id'], fallback: ''),
+      status: jsonString(json['status'], fallback: ''),
+      progress: jsonInt(json['progress']),
+      attempts: jsonInt(json['attempts']),
+      errorMessage: jsonNullableString(json['error_message']),
+    );
+  }
 }

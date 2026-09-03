@@ -1,3 +1,5 @@
+import '../../../shared/utils/json_helpers.dart';
+
 class VideoWithStats {
   const VideoWithStats({
     required this.id,
@@ -14,7 +16,6 @@ class VideoWithStats {
     this.description,
     this.thumbnailUrl,
     this.previewUrl,
-    this.videoUrl,
   });
 
   final String id;
@@ -22,7 +23,6 @@ class VideoWithStats {
   final String? description;
   final String? thumbnailUrl;
   final String? previewUrl;
-  final String? videoUrl;
   final int price;
   final int duration;
   final String status;
@@ -39,8 +39,11 @@ class VideoWithStats {
     final normalized = status.toLowerCase();
     return normalized == 'processing' ||
         normalized == 'uploading' ||
-        normalized == 'transcoding';
+        normalized == 'queued' ||
+        normalized == 'uploaded';
   }
+
+  bool get isReady => status.toLowerCase() == 'ready';
 
   bool get isDraft => !isPublished && !isProcessing && !isFailed;
 
@@ -58,33 +61,27 @@ class VideoWithStats {
   }
 
   factory VideoWithStats.fromJson(Map<String, dynamic> json) {
-    final isPublished = _bool(json['is_published']);
+    final isPublished = jsonBool(json['is_published']);
     final now = DateTime.now();
 
     return VideoWithStats(
-      id: _string(json['id'], fallback: ''),
-      title: _string(json['title'], fallback: 'Vidéo sans titre'),
-      description: _nullableString(json['description']),
-      thumbnailUrl: _nullableString(json['thumbnail_url']),
-      previewUrl: _nullableString(json['preview_url']),
-      videoUrl:
-          _nullableString(json['video_url']) ??
-          _nullableString(json['playback_url']) ??
-          _nullableString(json['stream_url']) ??
-          _nullableString(json['hls_url']) ??
-          _nullableString(json['master_url']),
-      price: _int(json['price']),
-      duration: _int(json['duration']),
-      status: _string(
+      id: jsonString(json['id'], fallback: ''),
+      title: jsonString(json['title'], fallback: 'Vidéo sans titre'),
+      description: jsonNullableString(json['description']),
+      thumbnailUrl: jsonNullableString(json['thumbnail_url']),
+      previewUrl: jsonNullableString(json['preview_url']),
+      price: jsonInt(json['price']),
+      duration: jsonInt(json['duration']),
+      status: jsonString(
         json['status'],
         fallback: isPublished ? 'published' : 'draft',
       ),
       isPublished: isPublished,
-      viewCount: _int(json['view_count']),
-      likesCount: _int(json['likes_count']),
-      revenue: _int(json['revenue']),
-      createdAt: _date(json['created_at']) ?? now,
-      updatedAt: _date(json['updated_at']) ?? now,
+      viewCount: jsonInt(json['view_count']),
+      likesCount: jsonInt(json['likes_count']),
+      revenue: jsonInt(json['revenue']),
+      createdAt: jsonDate(json['created_at']) ?? now,
+      updatedAt: jsonDate(json['updated_at']) ?? now,
     );
   }
 
@@ -165,7 +162,6 @@ class VideoWithStats {
     String? description,
     String? thumbnailUrl,
     String? previewUrl,
-    String? videoUrl,
     int? price,
     int? duration,
     String? status,
@@ -182,7 +178,6 @@ class VideoWithStats {
       description: description ?? this.description,
       thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       previewUrl: previewUrl ?? this.previewUrl,
-      videoUrl: videoUrl ?? this.videoUrl,
       price: price ?? this.price,
       duration: duration ?? this.duration,
       status: status ?? this.status,
@@ -194,51 +189,4 @@ class VideoWithStats {
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
-}
-
-String _string(Object? value, {required String fallback}) {
-  if (value is String && value.trim().isNotEmpty) {
-    return value;
-  }
-  return fallback;
-}
-
-String? _nullableString(Object? value) {
-  if (value is String && value.trim().isNotEmpty) {
-    return value;
-  }
-  return null;
-}
-
-int _int(Object? value) {
-  if (value is int) {
-    return value;
-  }
-  if (value is num) {
-    return value.round();
-  }
-  if (value is String) {
-    return int.tryParse(value) ?? 0;
-  }
-  return 0;
-}
-
-bool _bool(Object? value) {
-  if (value is bool) {
-    return value;
-  }
-  if (value is num) {
-    return value != 0;
-  }
-  if (value is String) {
-    return value.toLowerCase() == 'true' || value == '1';
-  }
-  return false;
-}
-
-DateTime? _date(Object? value) {
-  if (value is String && value.isNotEmpty) {
-    return DateTime.tryParse(value);
-  }
-  return null;
 }

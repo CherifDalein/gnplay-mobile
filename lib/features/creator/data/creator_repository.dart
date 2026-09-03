@@ -8,7 +8,10 @@ import '../../auth/data/token_storage.dart';
 import '../../auth/domain/user_read.dart';
 import '../domain/creator_analytics.dart';
 import '../domain/creator_dashboard.dart';
-import '../domain/creator_series.dart';
+import '../../../shared/utils/json_helpers.dart';
+import '../domain/payout_balances.dart';
+import '../domain/payout_provider.dart';
+import '../domain/payout_request.dart';
 import '../domain/top_video.dart';
 import '../domain/video_analytics.dart';
 import '../domain/video_playback_access.dart';
@@ -28,23 +31,41 @@ class CreatorRepository {
 
     final user = await _getUser(accessToken);
     final analytics = await _getAnalytics(accessToken);
-    final withdrawableBalance = await _getFlexibleBalance(
-      accessToken,
-      '/api/v1/payouts/balance',
-    );
-    final walletBalance = await _getFlexibleBalance(
-      accessToken,
-      '/api/v1/wallets/balance',
-    );
+    final balances = await _getPayoutBalances(accessToken);
     final videos = await _listMyVideos(accessToken, limit: 20, offset: 0);
     final topVideos = _mergeTopVideos(analytics.topVideos, videos);
 
     return CreatorDashboard(
       user: user,
-      withdrawableBalance: withdrawableBalance,
-      walletBalance: walletBalance,
+      withdrawableBalance: balances.withdrawableBalance,
+      walletBalance: balances.walletBalance,
       analytics: analytics,
       topVideos: topVideos,
+    );
+  }
+
+  /// Solde du portefeuille et solde retirable, tous deux renvoyés par
+  /// `GET /payouts/balance` (le second est un sous-ensemble net du premier).
+  Future<PayoutBalances> loadPayoutBalances() async {
+    final accessToken = await _requireAccessToken();
+    return _getPayoutBalances(accessToken);
+  }
+
+  Future<PayoutBalances> _getPayoutBalances(String accessToken) async {
+    final response = await _client.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/payouts/balance'),
+      headers: _authHeaders(accessToken),
+    );
+
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+
+    final decoded = _decodeObject(response.body);
+    return PayoutBalances(
+      walletBalance: jsonInt(decoded['wallet_balance']),
+      withdrawableBalance: jsonInt(decoded['withdrawable_balance']),
+      pendingEarnings: jsonInt(decoded['pending_earnings']),
     );
   }
 
@@ -199,92 +220,134 @@ class CreatorRepository {
     );
 
     if (_isSuccess(response)) {
-      final decoded = response.body.trim().isEmpty
-          ? <String, dynamic>{}
-          : jsonDecode(response.body);
-      return VideoUploadInitResponse.fromJson(decoded);
+      return VideoUploadInitResponse.fromJson(_decodeObject(response.body));
     }
 
     throw _apiException(response);
   }
 
-  Future<List<CreatorSeries>> listMySeries({
-    int limit = 20,
-    int offset = 0,
-  }) async {
-    final accessToken = await _requireAccessToken();
-    final uri = Uri.parse(
-      '${ApiConfig.baseUrl}/api/v1/playlists',
-    ).replace(queryParameters: {'limit': '$limit', 'offset': '$offset'});
-    final response = await _client.get(uri, headers: _authHeaders(accessToken));
-
-    if (_isSuccess(response)) {
-      final decoded = jsonDecode(response.body);
-      return _extractList(
-        decoded,
-      ).whereType<Map<String, dynamic>>().map(CreatorSeries.fromJson).toList();
-    }
-
-    throw _apiException(response);
-  }
-
-  Future<CreatorSeries> loadSeries(String seriesId) async {
-    final accessToken = await _requireAccessToken();
-    final response = await _client.get(
-      Uri.parse('${ApiConfig.baseUrl}/api/v1/playlists/$seriesId'),
-      headers: _authHeaders(accessToken),
-    );
-
-    if (_isSuccess(response)) {
-      return CreatorSeries.fromJson(_decodeObject(response.body));
-    }
-
-    throw _apiException(response);
-  }
-
-  Future<CreatorSeries> createSeries({
-    required String name,
-    String? description,
-    bool isPublic = false,
+  /// Renvoie de nouvelles URLs pré-signées pour reprendre un envoi interrompu.
+  Future<List<UploadPartTarget>> presignUploadParts(
+    String videoId, {
+    required String uploadId,
+    required List<int> partNumbers,
   }) async {
     final accessToken = await _requireAccessToken();
     final response = await _client.post(
-      Uri.parse('${ApiConfig.baseUrl}/api/v1/playlists'),
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/videos/upload/$videoId/parts/presign'),
+      headers: _authHeaders(accessToken),
+      body: jsonEncode({'upload_id': uploadId, 'parts': partNumbers}),
+    );
+
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+
+    final decoded = _decodeObject(response.body);
+    final parts = decoded['parts'];
+    if (parts is List) {
+      return parts
+          .whereType<Map<String, dynamic>>()
+          .map(UploadPartTarget.fromJson)
+          .toList();
+    }
+    return const [];
+  }
+
+  /// PUT brut d'un morceau de fichier vers une URL R2 pré-signée (pas
+  /// d'en-tête d'auth : le lien est déjà auto-authentifié). Renvoie l'ETag.
+  Future<String> uploadChunk(String uploadUrl, List<int> bytes) async {
+    final response = await _client.put(Uri.parse(uploadUrl), body: bytes);
+
+    if (!_isSuccess(response)) {
+      throw ApiException(
+        'Échec de l’envoi d’un morceau du fichier.',
+        statusCode: response.statusCode,
+      );
+    }
+
+    final etag = response.headers['etag'] ?? response.headers['ETag'];
+    if (etag == null || etag.isEmpty) {
+      throw const ApiException('Le serveur de stockage n’a pas renvoyé d’ETag.');
+    }
+    return etag.replaceAll('"', '');
+  }
+
+  Future<void> confirmUploadPart(
+    String videoId, {
+    required int partNumber,
+    required String etag,
+    required int size,
+  }) async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/videos/upload/$videoId/parts/confirm'),
+      headers: _authHeaders(accessToken),
+      body: jsonEncode({'part_number': partNumber, 'etag': etag, 'size': size}),
+    );
+
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+  }
+
+  Future<void> completeUpload(
+    String videoId, {
+    required String uploadId,
+    required List<({int partNumber, String etag})> parts,
+  }) async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/videos/upload/$videoId/complete'),
       headers: _authHeaders(accessToken),
       body: jsonEncode({
-        'name': name,
-        if (description != null && description.trim().isNotEmpty)
-          'description': description.trim(),
-        'is_public': isPublic,
+        'upload_id': uploadId,
+        'parts': parts
+            .map((p) => {'PartNumber': p.partNumber, 'ETag': p.etag})
+            .toList(),
       }),
     );
 
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+  }
+
+  Future<UploadStatusResponse> getUploadStatus(String videoId) async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/videos/upload/$videoId/status'),
+      headers: _authHeaders(accessToken),
+    );
+
     if (_isSuccess(response)) {
-      return CreatorSeries.fromJson(_decodeObject(response.body));
+      return UploadStatusResponse.fromJson(_decodeObject(response.body));
     }
 
     throw _apiException(response);
   }
 
-  Future<CreatorSeries> updateSeries(
-    String seriesId, {
-    String? name,
-    String? description,
-    bool? isPublic,
-  }) async {
+  Future<void> abortUpload(String videoId) async {
     final accessToken = await _requireAccessToken();
-    final response = await _client.patch(
-      Uri.parse('${ApiConfig.baseUrl}/api/v1/playlists/$seriesId'),
+    final response = await _client.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/videos/upload/$videoId/abort'),
       headers: _authHeaders(accessToken),
-      body: jsonEncode({
-        if (name != null) 'name': name,
-        if (description != null) 'description': description,
-        if (isPublic != null) 'is_public': isPublic,
-      }),
+    );
+
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+  }
+
+  Future<ProcessingStatusResponse> getProcessingStatus(String videoId) async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/videos/$videoId/processing-status'),
+      headers: _authHeaders(accessToken),
     );
 
     if (_isSuccess(response)) {
-      return CreatorSeries.fromJson(_decodeObject(response.body));
+      return ProcessingStatusResponse.fromJson(_decodeObject(response.body));
     }
 
     throw _apiException(response);
@@ -309,7 +372,7 @@ class CreatorRepository {
         .toList();
   }
 
-  Future<void> requestPayout({
+  Future<PayoutRequestRecord> requestPayout({
     required int amount,
     required String operator,
     String? destinationPhone,
@@ -327,7 +390,63 @@ class CreatorRepository {
     );
 
     if (_isSuccess(response)) {
-      return;
+      return PayoutRequestRecord.fromJson(_decodeObject(response.body));
+    }
+
+    throw _apiException(response);
+  }
+
+  Future<List<PayoutProviderOption>> listPayoutProviders() async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/payouts/providers'),
+      headers: _authHeaders(accessToken),
+    );
+
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is List) {
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(PayoutProviderOption.fromJson)
+          .toList();
+    }
+    return const [];
+  }
+
+  Future<List<PayoutRequestRecord>> listPayouts() async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/payouts'),
+      headers: _authHeaders(accessToken),
+    );
+
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is List) {
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(PayoutRequestRecord.fromJson)
+          .toList();
+    }
+    return const [];
+  }
+
+  Future<PayoutRequestRecord> getPayout(String payoutId) async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/payouts/$payoutId'),
+      headers: _authHeaders(accessToken),
+    );
+
+    if (_isSuccess(response)) {
+      return PayoutRequestRecord.fromJson(_decodeObject(response.body));
     }
 
     throw _apiException(response);
@@ -365,40 +484,6 @@ class CreatorRepository {
     }
 
     throw _apiException(response);
-  }
-
-  Future<int> _getFlexibleBalance(String accessToken, String path) async {
-    final response = await _client.get(
-      Uri.parse('${ApiConfig.baseUrl}$path'),
-      headers: _authHeaders(accessToken),
-    );
-
-    if (!_isSuccess(response)) {
-      throw _apiException(response);
-    }
-
-    final decoded = jsonDecode(response.body);
-    if (decoded is num) {
-      return decoded.round();
-    }
-    if (decoded is Map<String, dynamic>) {
-      for (final key in const [
-        'withdrawable_balance',
-        'available_balance',
-        'wallet_balance',
-        'current_balance',
-        'balance',
-        'amount',
-        'total',
-      ]) {
-        final value = decoded[key];
-        if (value is num) {
-          return value.round();
-        }
-      }
-    }
-
-    return 0;
   }
 
   Future<List<VideoWithStats>> _listMyVideos(

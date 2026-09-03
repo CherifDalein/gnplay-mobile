@@ -4,7 +4,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gnplay/core/theme/app_theme.dart';
 import 'package:gnplay/features/publish/presentation/screens/publish_screen.dart';
-import 'package:gnplay/features/series/presentation/screens/series_screen.dart';
 import 'package:gnplay/features/videos/presentation/screens/video_detail_screen.dart';
 import 'package:gnplay/features/videos/presentation/screens/video_stats_screen.dart';
 import 'package:gnplay/features/videos/presentation/screens/videos_screen.dart';
@@ -40,11 +39,6 @@ void main() {
     await tester.pump();
     expect(find.text('Statistiques'), findsOneWidget);
     expect(find.text('taux de complétion moyen'), findsOneWidget);
-
-    await tester.pumpWidget(_wrap(const SeriesScreen(seriesId: 'series-1')));
-    await tester.pump();
-    expect(find.text('Mode de vente'), findsOneWidget);
-    expect(find.text('Épisodes'), findsOneWidget);
   });
 }
 

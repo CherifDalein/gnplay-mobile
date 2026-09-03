@@ -4,6 +4,7 @@ class WalletLedgerEntry {
     required this.dateLabel,
     required this.amount,
     required this.kind,
+    this.payoutId,
   });
 
   final String label;
@@ -11,14 +12,23 @@ class WalletLedgerEntry {
   final int amount;
   final WalletLedgerKind kind;
 
+  /// `reference_id` quand `reference_type == "payout"` — permet le lien vers
+  /// l'écran de suivi du retrait.
+  final String? payoutId;
+
   factory WalletLedgerEntry.fromJson(Map<String, dynamic> json) {
-    final type = (json['type'] ?? json['kind'] ?? json['transaction_type'])
+    final type = (json['transaction_type'] ?? json['type'] ?? json['kind'])
         ?.toString()
         .toLowerCase();
+    final direction = json['direction']?.toString().toLowerCase();
     final rawAmount = json['amount'] ?? json['value'] ?? json['total'];
-    final amount = rawAmount is num
+    var amount = rawAmount is num
         ? rawAmount.round()
         : int.tryParse(rawAmount?.toString() ?? '') ?? 0;
+    if (direction == 'debit' && amount > 0) {
+      amount = -amount;
+    }
+    final referenceType = json['reference_type']?.toString().toLowerCase();
 
     return WalletLedgerEntry(
       label:
@@ -27,6 +37,9 @@ class WalletLedgerEntry {
       dateLabel: _dateLabel(json['created_at'] ?? json['date']),
       amount: amount,
       kind: WalletLedgerKind.fromType(type),
+      payoutId: referenceType == 'payout'
+          ? json['reference_id']?.toString()
+          : null,
     );
   }
 

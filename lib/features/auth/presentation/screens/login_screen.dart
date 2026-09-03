@@ -156,13 +156,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               onPressed: _login,
                             ),
                             const SizedBox(height: 16),
-                            Text(
-                              'Mot de passe oublié ?',
-                              textAlign: TextAlign.center,
-                              style: AppTextStyles.label.copyWith(
-                                color: AppColors.text2,
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w400,
+                            TextButton(
+                              onPressed: isLoading
+                                  ? null
+                                  : () => context.go('/forgot-password'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.text2,
+                              ),
+                              child: Text(
+                                'Mot de passe oublié ?',
+                                textAlign: TextAlign.center,
+                                style: AppTextStyles.label.copyWith(
+                                  color: AppColors.text2,
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w400,
+                                ),
                               ),
                             ),
                             const SizedBox(height: 26),

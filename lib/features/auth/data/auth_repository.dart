@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -57,9 +58,11 @@ class AuthRepository {
     );
   }
 
+  /// [refreshToken] null révoque toutes les sessions de l'utilisateur ;
+  /// fourni, ne révoque que cette session (cet appareil).
   Future<void> logout({
     required String accessToken,
-    required String refreshToken,
+    String? refreshToken,
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/api/v1/auth/logout');
     final response = await _client.post(
@@ -93,6 +96,65 @@ class AuthRepository {
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return UserRead.fromJson(_decodeObject(response.body));
+    }
+
+    throw ApiException(
+      _extractErrorMessage(response.body),
+      statusCode: response.statusCode,
+    );
+  }
+
+  Future<UserRead> updateProfile({
+    required String accessToken,
+    String? fullName,
+    String? pageName,
+    String? bio,
+  }) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/api/v1/users/me');
+    final response = await _client.patch(
+      uri,
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        if (fullName != null) 'full_name': fullName,
+        if (pageName != null) 'page_name': pageName,
+        if (bio != null) 'bio': bio,
+      }),
+    );
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return UserRead.fromJson(_decodeObject(response.body));
+    }
+
+    throw ApiException(
+      _extractErrorMessage(response.body),
+      statusCode: response.statusCode,
+    );
+  }
+
+  Future<String> uploadProfilePicture({
+    required String accessToken,
+    required File file,
+  }) async {
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}/api/v1/users/me/profile-picture',
+    );
+    final request = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $accessToken'
+      ..files.add(await http.MultipartFile.fromPath('file', file.path));
+
+    final streamedResponse = await _client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      final decoded = _decodeObject(response.body);
+      final url = decoded['profile_picture_url'];
+      if (url is String && url.isNotEmpty) {
+        return url;
+      }
+      throw const ApiException('Réponse inattendue du serveur.');
     }
 
     throw ApiException(
@@ -153,6 +215,56 @@ class AuthRepository {
         'phone_number': phoneNumber,
         'otp_type': 'register',
         'code': code,
+      }),
+    );
+
+    if (response.statusCode == 204) {
+      return;
+    }
+
+    throw ApiException(
+      _extractErrorMessage(response.body),
+      statusCode: response.statusCode,
+    );
+  }
+
+  Future<void> requestPasswordReset({required String phoneNumber}) async {
+    final uri = Uri.parse(
+      '${ApiConfig.baseUrl}/api/v1/auth/request-password-reset',
+    );
+    final response = await _client.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'phone_number': phoneNumber,
+        'otp_type': 'reset_password',
+      }),
+    );
+
+    if (response.statusCode == 202) {
+      return;
+    }
+
+    throw ApiException(
+      _extractErrorMessage(response.body),
+      statusCode: response.statusCode,
+    );
+  }
+
+  Future<void> resetPassword({
+    required String phoneNumber,
+    required String code,
+    required String newPassword,
+  }) async {
+    final uri = Uri.parse('${ApiConfig.baseUrl}/api/v1/auth/reset-password');
+    final response = await _client.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'phone_number': phoneNumber,
+        'otp_type': 'reset_password',
+        'code': code,
+        'new_password': newPassword,
       }),
     );
 

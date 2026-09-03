@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +11,7 @@ import '../../../creator/domain/video_analytics.dart';
 import '../../../creator/domain/video_with_stats.dart';
 import '../../../creator/presentation/providers/creator_content_provider.dart';
 import '../../../creator/presentation/widgets/creator_content_widgets.dart';
+import 'full_video_player_screen.dart';
 
 class VideoDetailScreen extends ConsumerWidget {
   const VideoDetailScreen({super.key, required this.videoId});
@@ -49,13 +48,8 @@ class VideoDetailScreen extends ConsumerWidget {
     final analytics =
         ref.watch(videoAnalyticsProvider(videoId)).valueOrNull ??
         VideoAnalytics.sample(videoId: videoId);
-    final playbackAccessState = ref.watch(
-      videoPlaybackAccessProvider(video.id),
-    );
-    final playbackAccessError = playbackAccessState.whenOrNull(
-      error: (error, stackTrace) => error,
-    );
     final mutationState = ref.watch(videoMutationControllerProvider);
+    final canWatchFull = !video.isProcessing && !video.isFailed;
 
     return Scaffold(
       backgroundColor: AppColors.bgApp,
@@ -65,19 +59,7 @@ class VideoDetailScreen extends ConsumerWidget {
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(
-                child: _PreviewHero(
-                  video: video,
-                  playbackUrl: playbackAccessState.valueOrNull?.url,
-                  playbackHeaders:
-                      playbackAccessState.valueOrNull?.httpHeaders ?? const {},
-                  watermark: playbackAccessState.valueOrNull?.watermark,
-                  isAccessLoading: playbackAccessState.isLoading,
-                  accessError: playbackAccessError,
-                  onRetryAccess: () {
-                    ref.invalidate(videoPlaybackAccessProvider(video.id));
-                  },
-                  onBack: () => _goBack(context),
-                ),
+                child: _PreviewHero(video: video, onBack: () => _goBack(context)),
               ),
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 116),
@@ -92,6 +74,19 @@ class VideoDetailScreen extends ConsumerWidget {
                     const SizedBox(height: 14),
                     _CompletionCard(analytics: analytics),
                     const SizedBox(height: 14),
+                    GnButton(
+                      label: 'Voir la vidéo complète',
+                      variant: GnButtonVariant.ghost,
+                      icon: const GnLineIcon(
+                        GnLineIconData.video,
+                        color: AppColors.text1,
+                        size: 17,
+                      ),
+                      onPressed: canWatchFull
+                          ? () => _openFullPlayer(context, video)
+                          : null,
+                    ),
+                    const SizedBox(height: 10),
                     GnButton(
                       label: 'Voir les statistiques détaillées',
                       variant: GnButtonVariant.ghost,
@@ -191,6 +186,15 @@ class VideoDetailScreen extends ConsumerWidget {
     }
   }
 
+  void _openFullPlayer(BuildContext context, VideoWithStats video) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FullVideoPlayerScreen(videoId: video.id, title: video.title),
+        fullscreenDialog: true,
+      ),
+    );
+  }
+
   void _goBack(BuildContext context) {
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
@@ -200,25 +204,13 @@ class VideoDetailScreen extends ConsumerWidget {
   }
 }
 
+/// Lit `video.previewUrl` — l'aperçu de 15 s généré automatiquement après
+/// transcodage, sur une URL publique (aucune session de lecture requise).
+/// La vidéo complète (protégée) se regarde via [FullVideoPlayerScreen].
 class _PreviewHero extends StatefulWidget {
-  const _PreviewHero({
-    required this.video,
-    required this.playbackUrl,
-    required this.playbackHeaders,
-    required this.watermark,
-    required this.isAccessLoading,
-    required this.accessError,
-    required this.onRetryAccess,
-    required this.onBack,
-  });
+  const _PreviewHero({required this.video, required this.onBack});
 
   final VideoWithStats video;
-  final String? playbackUrl;
-  final Map<String, String> playbackHeaders;
-  final String? watermark;
-  final bool isAccessLoading;
-  final Object? accessError;
-  final VoidCallback onRetryAccess;
   final VoidCallback onBack;
 
   @override
@@ -226,22 +218,12 @@ class _PreviewHero extends StatefulWidget {
 }
 
 class _PreviewHeroState extends State<_PreviewHero> {
-  static const _watermarkPositions = [
-    Alignment(-0.78, -0.72),
-    Alignment(0.78, -0.72),
-    Alignment(-0.78, 0.62),
-    Alignment(0.78, 0.62),
-    Alignment(0, 0),
-  ];
-
   VideoPlayerController? _controller;
-  Timer? _watermarkTimer;
   bool _isInitializing = false;
-  int _watermarkIndex = 0;
+  bool _isMuted = true;
   Object? _error;
 
-  String? get _sourceUrl => widget.playbackUrl;
-  String get _watermark => widget.watermark?.trim() ?? '';
+  String? get _sourceUrl => widget.video.previewUrl;
 
   bool get _isReady {
     final controller = _controller;
@@ -251,7 +233,6 @@ class _PreviewHeroState extends State<_PreviewHero> {
   @override
   void initState() {
     super.initState();
-    _syncWatermarkTimer();
     _initializePlayer();
   }
 
@@ -259,19 +240,14 @@ class _PreviewHeroState extends State<_PreviewHero> {
   void didUpdateWidget(covariant _PreviewHero oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.video.id != widget.video.id ||
-        oldWidget.playbackUrl != widget.playbackUrl ||
-        oldWidget.playbackHeaders != widget.playbackHeaders) {
+        oldWidget.video.previewUrl != widget.video.previewUrl) {
       _disposeController();
       _initializePlayer();
-    }
-    if (oldWidget.watermark != widget.watermark) {
-      _syncWatermarkTimer();
     }
   }
 
   @override
   void dispose() {
-    _watermarkTimer?.cancel();
     _disposeController();
     super.dispose();
   }
@@ -287,18 +263,15 @@ class _PreviewHeroState extends State<_PreviewHero> {
       _error = null;
     });
 
-    final controller = VideoPlayerController.networkUrl(
-      Uri.parse(sourceUrl),
-      formatHint: VideoFormat.hls,
-      httpHeaders: widget.playbackHeaders,
-      videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-    );
+    final controller = VideoPlayerController.networkUrl(Uri.parse(sourceUrl));
     _controller = controller;
     controller.addListener(_onPlayerChanged);
 
     try {
       await controller.initialize();
-      await controller.setLooping(false);
+      await controller.setLooping(true);
+      await controller.setVolume(_isMuted ? 0 : 1);
+      await controller.play();
       if (mounted) {
         setState(() => _isInitializing = false);
       }
@@ -331,6 +304,16 @@ class _PreviewHeroState extends State<_PreviewHero> {
     }
   }
 
+  Future<void> _toggleMute() async {
+    final controller = _controller;
+    if (controller == null) {
+      return;
+    }
+    final nextMuted = !_isMuted;
+    await controller.setVolume(nextMuted ? 0 : 1);
+    setState(() => _isMuted = nextMuted);
+  }
+
   void _disposeController() {
     final controller = _controller;
     if (controller != null) {
@@ -340,34 +323,13 @@ class _PreviewHeroState extends State<_PreviewHero> {
     _controller = null;
   }
 
-  void _syncWatermarkTimer() {
-    _watermarkTimer?.cancel();
-    _watermarkTimer = null;
-    _watermarkIndex = 0;
-
-    if (_watermark.isEmpty) {
-      return;
-    }
-
-    _watermarkTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _watermarkIndex = (_watermarkIndex + 1) % _watermarkPositions.length;
-      });
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
     final isPlaying = controller?.value.isPlaying ?? false;
-    final hasAccessError =
-        widget.accessError != null && widget.playbackUrl == null;
-    final hasPlayerError = _error != null && !_isReady;
-    final hasError = hasAccessError || hasPlayerError;
-    final isPreparing = widget.isAccessLoading && !_isReady && !hasError;
+    final video = widget.video;
+    final hasNoPreviewYet = (video.previewUrl ?? '').isEmpty;
+    final hasError = _error != null && !_isReady;
 
     return SizedBox(
       height: 212,
@@ -385,9 +347,13 @@ class _PreviewHeroState extends State<_PreviewHero> {
             )
           else
             GnVideoThumbnail(
-              url: widget.video.thumbnailUrl,
+              url: video.thumbnailUrl,
               label: hasError
                   ? 'aperçu indisponible'
+                  : hasNoPreviewYet
+                  ? (video.isProcessing
+                        ? 'aperçu en cours de génération'
+                        : 'aperçu indisponible')
                   : "lecture de l'aperçu 15 s",
             ),
           if (!_isReady)
@@ -405,51 +371,16 @@ class _PreviewHeroState extends State<_PreviewHero> {
               ),
             ),
           ),
-          if (_isReady && _watermark.isNotEmpty)
-            Positioned.fill(
-              child: Padding(
-                padding: const EdgeInsets.all(22),
-                child: AnimatedAlign(
-                  alignment:
-                      _watermarkPositions[_watermarkIndex %
-                          _watermarkPositions.length],
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeInOut,
-                  child: IgnorePointer(
-                    child: Text(
-                      _watermark,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.caption.copyWith(
-                        color: AppColors.text1.withValues(alpha: 0.18),
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black.withValues(alpha: 0.4),
-                            blurRadius: 6,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
           Center(
             child: _PlayerCenterControl(
               isReady: _isReady,
-              isInitializing: _isInitializing || isPreparing,
+              isInitializing: _isInitializing,
               hasError: hasError,
               isPlaying: isPlaying,
               onPressed: _togglePlayback,
               onRetry: () {
-                if (hasAccessError) {
-                  widget.onRetryAccess();
-                } else {
-                  _disposeController();
-                  _initializePlayer();
-                }
+                _disposeController();
+                _initializePlayer();
               },
             ),
           ),
@@ -459,9 +390,7 @@ class _PreviewHeroState extends State<_PreviewHero> {
               right: 42,
               bottom: 32,
               child: Text(
-                hasAccessError
-                    ? _accessErrorMessage(widget.accessError)
-                    : 'La vidéo n’est pas encore prête ou l’URL de streaming est inaccessible.',
+                'Impossible de lire l’aperçu de cette vidéo.',
                 textAlign: TextAlign.center,
                 style: AppTextStyles.micro.copyWith(
                   color: AppColors.text2,
@@ -494,7 +423,7 @@ class _PreviewHeroState extends State<_PreviewHero> {
                   vertical: 4,
                 ),
                 child: Text(
-                  'Lecture sécurisée',
+                  'Aperçu 15 s',
                   style: AppTextStyles.micro.copyWith(
                     color: AppColors.text1,
                     fontSize: 10.5,
@@ -503,6 +432,16 @@ class _PreviewHeroState extends State<_PreviewHero> {
               ),
             ),
           ),
+          if (_isReady)
+            Positioned(
+              bottom: 10,
+              right: 12,
+              child: _RoundIconButton(
+                icon: _isMuted ? Icons.volume_off : Icons.volume_up,
+                onPressed: _toggleMute,
+                size: 30,
+              ),
+            ),
           if (_isReady)
             Positioned(
               left: 0,
@@ -530,15 +469,6 @@ class _PreviewHeroState extends State<_PreviewHero> {
       ),
     );
   }
-}
-
-String _accessErrorMessage(Object? error) {
-  final detail = error?.toString().trim() ?? '';
-  if (detail.isEmpty) {
-    return 'Impossible d’obtenir le lien de lecture sécurisé.';
-  }
-
-  return 'Impossible d’obtenir le lien de lecture sécurisé. $detail';
 }
 
 class _PlayerCenterControl extends StatelessWidget {
@@ -802,19 +732,24 @@ class _PublishRow extends StatelessWidget {
 }
 
 class _RoundIconButton extends StatelessWidget {
-  const _RoundIconButton({required this.icon, required this.onPressed});
+  const _RoundIconButton({
+    required this.icon,
+    required this.onPressed,
+    this.size = 34,
+  });
 
   final IconData icon;
   final VoidCallback onPressed;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 34,
-      height: 34,
+      width: size,
+      height: size,
       child: IconButton(
         onPressed: onPressed,
-        icon: Icon(icon, color: AppColors.text1, size: 20),
+        icon: Icon(icon, color: AppColors.text1, size: size * 0.58),
         style: IconButton.styleFrom(
           backgroundColor: Colors.black.withValues(alpha: 0.55),
           padding: EdgeInsets.zero,

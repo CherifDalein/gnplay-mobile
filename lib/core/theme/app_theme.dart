@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
   const AppColors._();
@@ -37,24 +38,10 @@ class AppColors {
   static const dangerBg = Color(0x1AFF5A5F);
   static const infoBg = Color(0x243B82F6);
 
-  // Legacy aliases kept while screens are migrated phase by phase.
-  static const primary = accent500;
-  static const orange = accent600;
-  static const gold = accent300;
-  static const black = bgApp;
-  static const surface = surface1;
-  static const surfaceSoft = surface3;
-  static const border = border1;
-  static const burgundy = brand600;
-  static const burgundyDark = brand900;
-  static const textMain = text1;
-  static const textMuted = text3;
-  static const textSoft = text2;
-  static const textDisabled = text4;
-  static const textOnAccent = textInverse;
+  // Fond semi-transparent propre à la barre de navigation basse (pas un
+  // simple renommage d'un token existant, donc pas un alias "legacy").
   static const navBg = Color(0xEB0B0B0D);
   static const navBorder = surface1;
-  static const green = success;
 }
 
 class AppSpacing {
@@ -122,64 +109,56 @@ class AppFonts {
 class AppTextStyles {
   const AppTextStyles._();
 
-  static const displayLg = TextStyle(
-    fontFamily: AppFonts.display,
+  static TextStyle displayLg = GoogleFonts.sora(
     fontSize: 34,
     height: 1.1,
     fontWeight: FontWeight.w800,
     letterSpacing: 0,
   );
 
-  static const displayMd = TextStyle(
-    fontFamily: AppFonts.display,
+  static TextStyle displayMd = GoogleFonts.sora(
     fontSize: 26,
     height: 1.15,
     fontWeight: FontWeight.w800,
     letterSpacing: 0,
   );
 
-  static const title = TextStyle(
-    fontFamily: AppFonts.display,
+  static TextStyle title = GoogleFonts.sora(
     fontSize: 20,
     height: 1.3,
     fontWeight: FontWeight.w700,
     letterSpacing: 0,
   );
 
-  static const heading = TextStyle(
-    fontFamily: AppFonts.display,
+  static TextStyle heading = GoogleFonts.sora(
     fontSize: 16,
     height: 1.3,
     fontWeight: FontWeight.w700,
     letterSpacing: 0,
   );
 
-  static const label = TextStyle(
-    fontFamily: AppFonts.body,
+  static TextStyle label = GoogleFonts.inter(
     fontSize: 13,
     height: 1.4,
     fontWeight: FontWeight.w600,
     letterSpacing: 0,
   );
 
-  static const body = TextStyle(
-    fontFamily: AppFonts.body,
+  static TextStyle body = GoogleFonts.inter(
     fontSize: 14,
     height: 1.5,
     fontWeight: FontWeight.w400,
     letterSpacing: 0,
   );
 
-  static const caption = TextStyle(
-    fontFamily: AppFonts.body,
+  static TextStyle caption = GoogleFonts.inter(
     fontSize: 11.5,
     height: 1.4,
     fontWeight: FontWeight.w500,
     letterSpacing: 0,
   );
 
-  static const micro = TextStyle(
-    fontFamily: AppFonts.body,
+  static TextStyle micro = GoogleFonts.inter(
     fontSize: 10,
     height: 1.3,
     fontWeight: FontWeight.w600,
@@ -192,7 +171,7 @@ class AppTheme {
     final base = ThemeData(
       brightness: Brightness.dark,
       useMaterial3: true,
-      fontFamily: AppFonts.body,
+      textTheme: GoogleFonts.interTextTheme(ThemeData(brightness: Brightness.dark).textTheme),
     );
 
     return base.copyWith(
