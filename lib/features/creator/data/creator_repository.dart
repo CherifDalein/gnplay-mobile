@@ -65,7 +65,6 @@ class CreatorRepository {
     return PayoutBalances(
       walletBalance: jsonInt(decoded['wallet_balance']),
       withdrawableBalance: jsonInt(decoded['withdrawable_balance']),
-      pendingEarnings: jsonInt(decoded['pending_earnings']),
     );
   }
 

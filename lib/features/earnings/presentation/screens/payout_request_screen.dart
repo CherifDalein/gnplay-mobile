@@ -24,7 +24,7 @@ class PayoutRequestScreen extends ConsumerStatefulWidget {
 class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
   final _amountController = TextEditingController();
   final _phoneController = TextEditingController();
-  String? _selectedProviderId;
+  String? _selectedProviderShortName;
   bool _phonePrefilled = false;
 
   @override
@@ -48,10 +48,10 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
       _phoneController.text = dashboard.user.phoneNumber;
     }
 
-    final selectedProvider = providers.where((p) => p.id == _selectedProviderId).firstOrNull ??
+    final selectedProvider = providers.where((p) => p.shortName == _selectedProviderShortName).firstOrNull ??
         (providers.isNotEmpty ? providers.first : null);
-    if (_selectedProviderId == null && selectedProvider != null) {
-      _selectedProviderId = selectedProvider.id;
+    if (_selectedProviderShortName == null && selectedProvider != null) {
+      _selectedProviderShortName = selectedProvider.shortName;
     }
 
     final amount = int.tryParse(_amountController.text) ?? 0;
@@ -207,12 +207,12 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
                   spacing: 9,
                   runSpacing: 9,
                   children: providers.map((provider) {
-                    final selected = provider.id == _selectedProviderId;
+                    final selected = provider.shortName == _selectedProviderShortName;
                     return _ProviderChip(
                       provider: provider,
                       selected: selected,
                       onTap: () =>
-                          setState(() => _selectedProviderId = provider.id),
+                          setState(() => _selectedProviderShortName = provider.shortName),
                     );
                   }).toList(),
                 ),
@@ -256,7 +256,7 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
 
   Future<void> _submit() async {
     final amount = int.tryParse(_amountController.text) ?? 0;
-    final providerId = _selectedProviderId;
+    final providerId = _selectedProviderShortName;
     if (amount <= 0 || providerId == null) {
       return;
     }

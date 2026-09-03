@@ -345,6 +345,10 @@ class _LedgerTile extends StatelessWidget {
         foreground: AppColors.info,
       ),
       WalletLedgerKind.purchase => const _LedgerColors(
+        background: Color(0xFF22222A),
+        foreground: AppColors.text2,
+      ),
+      WalletLedgerKind.refund => const _LedgerColors(
         background: AppColors.warningBg,
         foreground: AppColors.warning,
       ),
