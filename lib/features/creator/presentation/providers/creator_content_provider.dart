@@ -6,6 +6,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/api_exception.dart';
+import '../../../auth/presentation/providers/auth_controller.dart';
+import '../../../auth/presentation/providers/device_repository_provider.dart';
+import '../../../auth/presentation/providers/token_storage_provider.dart';
 import '../../data/creator_repository.dart';
 import '../../domain/video_analytics.dart';
 import '../../domain/video_playback_access.dart';
@@ -43,11 +46,42 @@ final videoAnalyticsProvider = FutureProvider.autoDispose
       return ref.watch(creatorRepositoryProvider).loadVideoAnalytics(videoId);
     });
 
+/// L'enregistrement de l'appareil au login (voir AuthController) est
+/// best-effort et non bloquant : s'il n'a pas eu le temps de se terminer
+/// (ou a échoué transitoirement) avant que l'utilisateur ouvre une vidéo,
+/// la session de lecture est refusée avec "device not registered". Plutôt
+/// que de faire échouer la lecture pour une simple question de timing, on
+/// (ré)enregistre explicitement l'appareil une fois puis on retente.
 final videoPlaybackAccessProvider = FutureProvider.autoDispose
-    .family<VideoPlaybackAccess, String>((ref, videoId) {
-      return ref
-          .watch(creatorRepositoryProvider)
-          .loadVideoPlaybackAccess(videoId);
+    .family<VideoPlaybackAccess, String>((ref, videoId) async {
+      final repository = ref.watch(creatorRepositoryProvider);
+      try {
+        return await repository.loadVideoPlaybackAccess(videoId);
+      } on ApiException catch (error) {
+        final isUnregisteredDevice =
+            error.statusCode == 403 &&
+            error.message.toLowerCase().contains('device');
+        if (!isUnregisteredDevice) {
+          rethrow;
+        }
+
+        final authToken = ref.read(authControllerProvider).valueOrNull;
+        if (authToken == null) {
+          rethrow;
+        }
+
+        final deviceId = await ref
+            .watch(tokenStorageProvider)
+            .readOrCreateDeviceId();
+        // Si l'appareil courant est déjà au maximum (3/3 ailleurs), cet
+        // appel lève sa propre erreur explicite ("Maximum of 3 active
+        // devices reached...") qui remplace l'originale, moins actionnable.
+        await ref
+            .watch(deviceRepositoryProvider)
+            .registerDevice(accessToken: authToken.accessToken, deviceId: deviceId);
+
+        return await repository.loadVideoPlaybackAccess(videoId);
+      }
     });
 
 final videoMutationControllerProvider =

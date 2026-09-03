@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../../core/network/api_exception.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../creator/domain/video_playback_access.dart';
 import '../../../creator/presentation/providers/creator_content_provider.dart';
@@ -33,35 +35,51 @@ class FullVideoPlayerScreen extends ConsumerWidget {
           loading: () => const _CenteredState(
             child: CircularProgressIndicator(color: AppColors.accent500),
           ),
-          error: (error, stackTrace) => _CenteredState(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Impossible d’obtenir le lien de lecture sécurisé.',
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.body.copyWith(color: AppColors.text2),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '$error',
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.caption.copyWith(color: AppColors.text3),
-                ),
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () =>
-                      ref.invalidate(videoPlaybackAccessProvider(videoId)),
-                  child: Text(
-                    'Réessayer',
-                    style: AppTextStyles.label.copyWith(
-                      color: AppColors.accent500,
-                    ),
+          error: (error, stackTrace) {
+            final isDeviceLimit = _isDeviceLimitError(error);
+            return _CenteredState(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Impossible d’obtenir le lien de lecture sécurisé.',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.body.copyWith(color: AppColors.text2),
                   ),
-                ),
-              ],
-            ),
-          ),
+                  const SizedBox(height: 6),
+                  Text(
+                    isDeviceLimit
+                        ? 'Vous avez atteint la limite de 3 appareils actifs. Révoquez-en un pour regarder des vidéos sur celui-ci.'
+                        : '$error',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.caption.copyWith(color: AppColors.text3),
+                  ),
+                  const SizedBox(height: 16),
+                  if (isDeviceLimit)
+                    TextButton(
+                      onPressed: () => context.push('/devices'),
+                      child: Text(
+                        'Gérer mes appareils',
+                        style: AppTextStyles.label.copyWith(
+                          color: AppColors.accent500,
+                        ),
+                      ),
+                    )
+                  else
+                    TextButton(
+                      onPressed: () =>
+                          ref.invalidate(videoPlaybackAccessProvider(videoId)),
+                      child: Text(
+                        'Réessayer',
+                        style: AppTextStyles.label.copyWith(
+                          color: AppColors.accent500,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -330,4 +348,10 @@ class _CloseButton extends StatelessWidget {
       ),
     );
   }
+}
+
+bool _isDeviceLimitError(Object error) {
+  return error is ApiException &&
+      error.statusCode == 400 &&
+      error.message.toLowerCase().contains('maximum of 3');
 }

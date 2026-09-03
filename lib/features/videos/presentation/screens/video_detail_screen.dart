@@ -542,16 +542,32 @@ class _PreviewHeroState extends State<_PreviewHero> {
           ),
           if (hasError)
             Positioned(
-              left: 42,
-              right: 42,
+              left: 24,
+              right: 24,
               bottom: 32,
-              child: Text(
-                'Impossible de lire l’aperçu de cette vidéo.',
-                textAlign: TextAlign.center,
-                style: AppTextStyles.micro.copyWith(
-                  color: AppColors.text2,
-                  fontWeight: FontWeight.w500,
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Impossible de lire l’aperçu de cette vidéo.',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.micro.copyWith(
+                      color: AppColors.text2,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$_error',
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.micro.copyWith(
+                      color: AppColors.text3,
+                      fontSize: 9,
+                    ),
+                  ),
+                ],
               ),
             ),
           Positioned(
