@@ -34,7 +34,18 @@ class GnVideoThumbnail extends StatelessWidget {
             if (url == null || url!.isEmpty)
               _StripedPlaceholder(label: label)
             else
-              Image.network(url!, fit: BoxFit.cover),
+              Image.network(
+                url!,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) {
+                    return child;
+                  }
+                  return _StripedPlaceholder(label: label);
+                },
+                errorBuilder: (context, error, stackTrace) =>
+                    _StripedPlaceholder(label: label),
+              ),
             if (durationLabel != null)
               Positioned(
                 right: 5,
@@ -248,6 +259,101 @@ class GnCompletionRing extends StatelessWidget {
       ),
     );
   }
+}
+
+/// État de chargement plein écran, à utiliser à la place d'un repli
+/// silencieux sur des données d'exemple pendant qu'un [FutureProvider]
+/// résout sa première valeur.
+class GnLoadingState extends StatelessWidget {
+  const GnLoadingState({super.key, this.topPadding = 100});
+
+  final double topPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(top: topPadding),
+      child: const Center(
+        child: CircularProgressIndicator(color: AppColors.accent500),
+      ),
+    );
+  }
+}
+
+/// État d'erreur explicite avec action de reprise — jamais de repli
+/// silencieux sur des données d'exemple : une erreur réseau doit se voir.
+class GnAsyncError extends StatelessWidget {
+  const GnAsyncError({
+    super.key,
+    required this.message,
+    required this.onRetry,
+    this.topPadding = 80,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+  final double topPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(top: topPadding, left: 24, right: 24),
+      child: Column(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AppColors.dangerBg,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.wifi_off_rounded,
+              color: AppColors.danger,
+              size: 26,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Impossible de charger le contenu',
+            textAlign: TextAlign.center,
+            style: AppTextStyles.label.copyWith(color: AppColors.text1),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: AppTextStyles.caption.copyWith(color: AppColors.text3),
+          ),
+          const SizedBox(height: 18),
+          OutlinedButton(
+            onPressed: onRetry,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.text1,
+              side: const BorderSide(color: AppColors.border1),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            ),
+            child: Text(
+              'Réessayer',
+              style: AppTextStyles.label.copyWith(color: AppColors.text1),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String friendlyErrorMessage(Object error) {
+  final text = error.toString().trim();
+  if (text.isEmpty) {
+    return 'Une erreur inattendue est survenue.';
+  }
+  return text;
 }
 
 class _StripedPlaceholder extends StatelessWidget {

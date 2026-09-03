@@ -17,42 +17,52 @@ class VideoStatsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final videos =
-        ref.watch(creatorVideosProvider).valueOrNull ??
-        VideoWithStats.samples();
-    final video = videos.firstWhere(
-      (item) => item.id == videoId,
-      orElse: () => VideoWithStats.sample(id: videoId),
-    );
-    final analytics =
-        ref.watch(videoAnalyticsProvider(videoId)).valueOrNull ??
-        VideoAnalytics.sample(videoId: videoId);
-    final completion = analytics.completionPercent;
+    final videoState = ref.watch(videoByIdProvider(videoId));
 
     return Scaffold(
       backgroundColor: AppColors.bgApp,
       body: SafeArea(
         bottom: false,
         child: GnAppBackground(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 116),
-            children: [
-              _Header(onBack: () => _goBack(context)),
-              const SizedBox(height: 16),
-              _VideoPickerTile(video: video),
-              const SizedBox(height: 28),
-              Center(child: GnCompletionRing(percent: completion)),
-              const SizedBox(height: 26),
-              _MetricsTable(analytics: analytics),
-              const SizedBox(height: 12),
-              Text(
-                'Le revenu affiché est déjà net de la commission de la plateforme.',
-                style: AppTextStyles.caption.copyWith(
-                  color: AppColors.text3,
-                  fontSize: 11,
-                ),
-              ),
-            ],
+          child: RefreshIndicator(
+            color: AppColors.accent500,
+            backgroundColor: AppColors.surface1,
+            onRefresh: () async {
+              ref.invalidate(creatorVideosProvider);
+              ref.invalidate(videoAnalyticsProvider(videoId));
+              final future = ref.read(creatorVideosProvider.future);
+              await future;
+            },
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 116),
+              children: [
+                _Header(onBack: () => _goBack(context)),
+                const SizedBox(height: 16),
+                switch (videoState) {
+                  AsyncData(value: final video?) => _StatsContent(
+                    videoId: videoId,
+                    video: video,
+                  ),
+                  AsyncData() => Padding(
+                    padding: const EdgeInsets.only(top: 60),
+                    child: Center(
+                      child: Text(
+                        'Cette vidéo n’existe plus.',
+                        style: AppTextStyles.body.copyWith(
+                          color: AppColors.text2,
+                        ),
+                      ),
+                    ),
+                  ),
+                  AsyncError(:final error) => GnAsyncError(
+                    message: friendlyErrorMessage(error),
+                    onRetry: () => ref.invalidate(creatorVideosProvider),
+                  ),
+                  _ => const GnLoadingState(),
+                },
+              ],
+            ),
           ),
         ),
       ),
@@ -65,6 +75,49 @@ class VideoStatsScreen extends ConsumerWidget {
     } else {
       context.go('/videos/$videoId');
     }
+  }
+}
+
+class _StatsContent extends ConsumerWidget {
+  const _StatsContent({required this.videoId, required this.video});
+
+  final String videoId;
+  final VideoWithStats video;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final analyticsState = ref.watch(videoAnalyticsProvider(videoId));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _VideoPickerTile(video: video),
+        const SizedBox(height: 28),
+        switch (analyticsState) {
+          AsyncData(:final value) => Column(
+            children: [
+              Center(child: GnCompletionRing(percent: value.completionPercent)),
+              const SizedBox(height: 26),
+              _MetricsTable(analytics: value),
+              const SizedBox(height: 12),
+              Text(
+                'Le revenu affiché est déjà net de la commission de la plateforme.',
+                style: AppTextStyles.caption.copyWith(
+                  color: AppColors.text3,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+          AsyncError(:final error) => GnAsyncError(
+            message: friendlyErrorMessage(error),
+            onRetry: () => ref.invalidate(videoAnalyticsProvider(videoId)),
+            topPadding: 20,
+          ),
+          _ => const GnLoadingState(topPadding: 40),
+        },
+      ],
+    );
   }
 }
 
@@ -119,16 +172,6 @@ class _VideoPickerTile extends StatelessWidget {
               style: AppTextStyles.label.copyWith(color: AppColors.text1),
             ),
           ),
-          const SizedBox(width: 10),
-          Text(
-            'Changer',
-            style: AppTextStyles.micro.copyWith(
-              color: AppColors.accent500,
-              fontSize: 11,
-            ),
-          ),
-          const SizedBox(width: 4),
-          const Icon(Icons.keyboard_arrow_down, color: AppColors.accent500),
         ],
       ),
     );

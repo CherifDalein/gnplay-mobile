@@ -21,6 +21,23 @@ final creatorVideosProvider = FutureProvider.autoDispose<List<VideoWithStats>>((
   return ref.watch(creatorRepositoryProvider).listMyVideos();
 });
 
+/// Résout une vidéo par id depuis la liste déjà chargée par
+/// [creatorVideosProvider] — état de chargement/erreur transmis tel quel, et
+/// `null` en cas de succès si la vidéo n'existe plus dans la liste (ex.
+/// supprimée ailleurs). Centralise cette recherche pour éviter de la
+/// dupliquer (avec un faux repli sur des données d'exemple) dans chaque écran.
+final videoByIdProvider = Provider.autoDispose
+    .family<AsyncValue<VideoWithStats?>, String>((ref, videoId) {
+      return ref.watch(creatorVideosProvider).whenData((videos) {
+        for (final video in videos) {
+          if (video.id == videoId) {
+            return video;
+          }
+        }
+        return null;
+      });
+    });
+
 final videoAnalyticsProvider = FutureProvider.autoDispose
     .family<VideoAnalytics, String>((ref, videoId) {
       return ref.watch(creatorRepositoryProvider).loadVideoAnalytics(videoId);

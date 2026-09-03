@@ -47,8 +47,6 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
 
     final videosState = ref.watch(creatorVideosProvider);
     final mutationState = ref.watch(videoMutationControllerProvider);
-    final videos = videosState.valueOrNull ?? VideoWithStats.samples();
-    final filteredVideos = _filteredVideos(videos);
 
     return Scaffold(
       backgroundColor: AppColors.bgApp,
@@ -80,40 +78,60 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
                     onChanged: (filter) => setState(() => _filter = filter),
                   ),
                 ],
-                if (_filter != _VideoFilter.all) ...[
-                  const SizedBox(height: 14),
-                  _ActiveFilter(
-                    filter: _filter,
-                    resultCount: filteredVideos.length,
-                    onClear: () {
-                      setState(() => _filter = _VideoFilter.all);
-                    },
+                switch (videosState) {
+                  AsyncData(:final value) => _buildList(value, mutationState),
+                  AsyncError(:final error) => GnAsyncError(
+                    message: friendlyErrorMessage(error),
+                    onRetry: () => ref.invalidate(creatorVideosProvider),
                   ),
-                ],
-                const SizedBox(height: 16),
-                if (filteredVideos.isEmpty)
-                  const _EmptyState(
-                    title: 'Aucune vidéo',
-                    subtitle: 'Essayez un autre filtre ou publiez un contenu.',
-                  )
-                else
-                  ...filteredVideos.map(
-                    (video) => Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _VideoCard(
-                        video: video,
-                        isLoading: mutationState.isLoading,
-                        onOpen: () => context.go('/videos/${video.id}'),
-                        onRetry: () => context.go('/publish'),
-                        onToggle: (value) => _togglePublish(video, value),
-                      ),
-                    ),
-                  ),
+                  _ => const GnLoadingState(),
+                },
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildList(List<VideoWithStats> videos, AsyncValue<void> mutationState) {
+    final filteredVideos = _filteredVideos(videos);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_filter != _VideoFilter.all) ...[
+          const SizedBox(height: 14),
+          _ActiveFilter(
+            filter: _filter,
+            resultCount: filteredVideos.length,
+            onClear: () {
+              setState(() => _filter = _VideoFilter.all);
+            },
+          ),
+        ],
+        const SizedBox(height: 16),
+        if (filteredVideos.isEmpty)
+          _EmptyState(
+            title: videos.isEmpty ? 'Aucune vidéo publiée' : 'Aucun résultat',
+            subtitle: videos.isEmpty
+                ? 'Publiez votre première vidéo pour la retrouver ici.'
+                : 'Essayez un autre filtre ou une autre recherche.',
+          )
+        else
+          ...filteredVideos.map(
+            (video) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _VideoCard(
+                video: video,
+                isLoading: mutationState.isLoading,
+                onOpen: () => context.go('/videos/${video.id}'),
+                onRetry: () => context.go('/publish'),
+                onToggle: (value) => _togglePublish(video, value),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -141,7 +159,7 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
       final future = ref.refresh(creatorVideosProvider.future);
       await future;
     } catch (_) {
-      // The screen already keeps a local preview dataset for offline tests.
+      // L'erreur est déjà affichée via l'état AsyncError du provider.
     }
   }
 

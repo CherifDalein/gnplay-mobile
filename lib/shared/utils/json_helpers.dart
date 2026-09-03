@@ -25,6 +25,19 @@ int jsonInt(Object? value) {
   return 0;
 }
 
+double jsonDouble(Object? value) {
+  if (value is double) {
+    return value;
+  }
+  if (value is num) {
+    return value.toDouble();
+  }
+  if (value is String) {
+    return double.tryParse(value.replaceAll(',', '.')) ?? 0;
+  }
+  return 0;
+}
+
 bool jsonBool(Object? value) {
   if (value is bool) {
     return value;

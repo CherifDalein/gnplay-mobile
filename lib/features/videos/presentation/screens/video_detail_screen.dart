@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,13 +15,41 @@ import '../../../creator/presentation/providers/creator_content_provider.dart';
 import '../../../creator/presentation/widgets/creator_content_widgets.dart';
 import 'full_video_player_screen.dart';
 
-class VideoDetailScreen extends ConsumerWidget {
+class VideoDetailScreen extends ConsumerStatefulWidget {
   const VideoDetailScreen({super.key, required this.videoId});
 
   final String videoId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<VideoDetailScreen> createState() => _VideoDetailScreenState();
+}
+
+class _VideoDetailScreenState extends ConsumerState<VideoDetailScreen> {
+  Timer? _processingPollTimer;
+
+  @override
+  void dispose() {
+    _processingPollTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Tant que la vidéo est en traitement côté serveur, on revérifie
+  /// périodiquement pour faire apparaître l'aperçu dès qu'il est prêt, sans
+  /// action manuelle de l'utilisateur.
+  void _scheduleProcessingPoll(VideoWithStats? video) {
+    _processingPollTimer?.cancel();
+    if (video == null || !video.isProcessing) {
+      return;
+    }
+    _processingPollTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted) {
+        ref.invalidate(creatorVideosProvider);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     ref.listen<AsyncValue<void>>(videoMutationControllerProvider, (
       previous,
       next,
@@ -38,87 +68,50 @@ class VideoDetailScreen extends ConsumerWidget {
       );
     });
 
-    final videos =
-        ref.watch(creatorVideosProvider).valueOrNull ??
-        VideoWithStats.samples();
-    final video = videos.firstWhere(
-      (item) => item.id == videoId,
-      orElse: () => VideoWithStats.sample(id: videoId),
-    );
-    final analytics =
-        ref.watch(videoAnalyticsProvider(videoId)).valueOrNull ??
-        VideoAnalytics.sample(videoId: videoId);
+    final videoState = ref.watch(videoByIdProvider(widget.videoId));
+    videoState.whenData(_scheduleProcessingPoll);
     final mutationState = ref.watch(videoMutationControllerProvider);
-    final canWatchFull = !video.isProcessing && !video.isFailed;
 
     return Scaffold(
       backgroundColor: AppColors.bgApp,
       body: SafeArea(
         bottom: false,
         child: GnAppBackground(
-          child: CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: _PreviewHero(video: video, onBack: () => _goBack(context)),
+          child: RefreshIndicator(
+            color: AppColors.accent500,
+            backgroundColor: AppColors.surface1,
+            onRefresh: () async {
+              final future = ref.refresh(creatorVideosProvider.future);
+              await future;
+            },
+            child: switch (videoState) {
+              AsyncData(value: final video?) => _DetailContent(
+                video: video,
+                mutationState: mutationState,
+                onBack: () => _goBack(context),
+                onEdit: () => _openEditSheet(context, video),
+                onTogglePublish: (value) => ref
+                    .read(videoMutationControllerProvider.notifier)
+                    .setPublished(video, value),
+                onDelete: () => _confirmDelete(context, ref, video),
+                onOpenStats: () => context.go('/videos/${video.id}/stats'),
+                onOpenFullPlayer: () => _openFullPlayer(context, video),
               ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 116),
-                sliver: SliverList(
-                  delegate: SliverChildListDelegate.fixed([
-                    _TitleBlock(
-                      video: video,
-                      onEdit: () => _openEditSheet(context, video),
-                    ),
-                    const SizedBox(height: 18),
-                    _MetricGrid(video: video, analytics: analytics),
-                    const SizedBox(height: 14),
-                    _CompletionCard(analytics: analytics),
-                    const SizedBox(height: 14),
-                    GnButton(
-                      label: 'Voir la vidéo complète',
-                      variant: GnButtonVariant.ghost,
-                      icon: const GnLineIcon(
-                        GnLineIconData.video,
-                        color: AppColors.text1,
-                        size: 17,
-                      ),
-                      onPressed: canWatchFull
-                          ? () => _openFullPlayer(context, video)
-                          : null,
-                    ),
-                    const SizedBox(height: 10),
-                    GnButton(
-                      label: 'Voir les statistiques détaillées',
-                      variant: GnButtonVariant.ghost,
-                      icon: const GnLineIcon(
-                        GnLineIconData.eye,
-                        color: AppColors.text1,
-                        size: 17,
-                      ),
-                      onPressed: () => context.go('/videos/${video.id}/stats'),
-                    ),
-                    const SizedBox(height: 20),
-                    _PublishRow(
-                      video: video,
-                      isLoading: mutationState.isLoading,
-                      onToggle: (value) {
-                        ref
-                            .read(videoMutationControllerProvider.notifier)
-                            .setPublished(video, value);
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    GnButton(
-                      label: 'Supprimer la vidéo',
-                      variant: GnButtonVariant.danger,
-                      onPressed: mutationState.isLoading
-                          ? null
-                          : () => _confirmDelete(context, ref, video),
-                    ),
-                  ]),
-                ),
+              AsyncData() => _NotFoundView(onBack: () => _goBack(context)),
+              AsyncError(:final error) => ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  GnAsyncError(
+                    message: friendlyErrorMessage(error),
+                    onRetry: () => ref.invalidate(creatorVideosProvider),
+                  ),
+                ],
               ),
-            ],
+              _ => ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: const [GnLoadingState()],
+              ),
+            },
           ),
         ),
       ),
@@ -201,6 +194,169 @@ class VideoDetailScreen extends ConsumerWidget {
     } else {
       context.go('/videos');
     }
+  }
+}
+
+class _NotFoundView extends StatelessWidget {
+  const _NotFoundView({required this.onBack});
+
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 40),
+      children: [
+        IconButton(
+          onPressed: onBack,
+          icon: const Icon(Icons.arrow_back, color: AppColors.text2),
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 60),
+          child: Center(
+            child: Text(
+              'Cette vidéo n’existe plus.',
+              style: TextStyle(color: AppColors.text2),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DetailContent extends StatelessWidget {
+  const _DetailContent({
+    required this.video,
+    required this.mutationState,
+    required this.onBack,
+    required this.onEdit,
+    required this.onTogglePublish,
+    required this.onDelete,
+    required this.onOpenStats,
+    required this.onOpenFullPlayer,
+  });
+
+  final VideoWithStats video;
+  final AsyncValue<void> mutationState;
+  final VoidCallback onBack;
+  final VoidCallback onEdit;
+  final ValueChanged<bool> onTogglePublish;
+  final VoidCallback onDelete;
+  final VoidCallback onOpenStats;
+  final VoidCallback onOpenFullPlayer;
+
+  @override
+  Widget build(BuildContext context) {
+    final canWatchFull = !video.isProcessing && !video.isFailed;
+
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(child: _PreviewHero(video: video, onBack: onBack)),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 116),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate.fixed([
+              _TitleBlock(video: video, onEdit: onEdit),
+              const SizedBox(height: 18),
+              _AnalyticsSection(videoId: video.id, video: video),
+              const SizedBox(height: 14),
+              GnButton(
+                label: 'Voir la vidéo complète',
+                variant: GnButtonVariant.ghost,
+                icon: const GnLineIcon(
+                  GnLineIconData.video,
+                  color: AppColors.text1,
+                  size: 17,
+                ),
+                onPressed: canWatchFull ? onOpenFullPlayer : null,
+              ),
+              const SizedBox(height: 10),
+              GnButton(
+                label: 'Voir les statistiques détaillées',
+                variant: GnButtonVariant.ghost,
+                icon: const GnLineIcon(
+                  GnLineIconData.eye,
+                  color: AppColors.text1,
+                  size: 17,
+                ),
+                onPressed: onOpenStats,
+              ),
+              const SizedBox(height: 20),
+              _PublishRow(
+                video: video,
+                isLoading: mutationState.isLoading,
+                onToggle: onTogglePublish,
+              ),
+              const SizedBox(height: 12),
+              GnButton(
+                label: 'Supprimer la vidéo',
+                variant: GnButtonVariant.danger,
+                onPressed: mutationState.isLoading ? null : onDelete,
+              ),
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Regroupe la grille de métriques et la carte de complétion, avec ses
+/// propres états de chargement/erreur — une analytique en échec ne doit pas
+/// empêcher de voir ou de lire la vidéo elle-même.
+class _AnalyticsSection extends ConsumerWidget {
+  const _AnalyticsSection({required this.videoId, required this.video});
+
+  final String videoId;
+  final VideoWithStats video;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final analyticsState = ref.watch(videoAnalyticsProvider(videoId));
+
+    return switch (analyticsState) {
+      AsyncData(:final value) => Column(
+        children: [
+          _MetricGrid(video: video, analytics: value),
+          const SizedBox(height: 14),
+          _CompletionCard(analytics: value),
+        ],
+      ),
+      AsyncError() => GnCard(
+        radius: 13,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Statistiques indisponibles pour le moment.',
+                style: AppTextStyles.caption.copyWith(color: AppColors.text3),
+              ),
+            ),
+            TextButton(
+              onPressed: () => ref.invalidate(videoAnalyticsProvider(videoId)),
+              child: Text(
+                'Réessayer',
+                style: AppTextStyles.caption.copyWith(
+                  color: AppColors.accent500,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      _ => const SizedBox(
+        height: 96,
+        child: Center(
+          child: CircularProgressIndicator(
+            strokeWidth: 2.4,
+            color: AppColors.accent500,
+          ),
+        ),
+      ),
+    };
   }
 }
 

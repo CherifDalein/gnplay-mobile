@@ -1,3 +1,5 @@
+import '../../../shared/utils/json_helpers.dart';
+
 class VideoAnalytics {
   const VideoAnalytics({
     required this.videoId,
@@ -28,14 +30,14 @@ class VideoAnalytics {
 
   factory VideoAnalytics.fromJson(Map<String, dynamic> json) {
     return VideoAnalytics(
-      videoId: _string(json['video_id'], fallback: ''),
-      views: _int(json['views']),
-      uniqueViewers: _int(json['unique_viewers']),
-      completedViews: _int(json['completed_views']),
-      averageCompletionRate: _double(json['average_completion_rate']),
-      likesCount: _int(json['likes_count']),
-      purchasesCount: _int(json['purchases_count']),
-      revenue: _int(json['revenue']),
+      videoId: jsonString(json['video_id'], fallback: ''),
+      views: jsonInt(json['views']),
+      uniqueViewers: jsonInt(json['unique_viewers']),
+      completedViews: jsonInt(json['completed_views']),
+      averageCompletionRate: jsonDouble(json['average_completion_rate']),
+      likesCount: jsonInt(json['likes_count']),
+      purchasesCount: jsonInt(json['purchases_count']),
+      revenue: jsonInt(json['revenue']),
     );
   }
 
@@ -51,37 +53,4 @@ class VideoAnalytics {
       revenue: 1842000,
     );
   }
-}
-
-String _string(Object? value, {required String fallback}) {
-  if (value is String && value.trim().isNotEmpty) {
-    return value;
-  }
-  return fallback;
-}
-
-int _int(Object? value) {
-  if (value is int) {
-    return value;
-  }
-  if (value is num) {
-    return value.round();
-  }
-  if (value is String) {
-    return int.tryParse(value) ?? 0;
-  }
-  return 0;
-}
-
-double _double(Object? value) {
-  if (value is double) {
-    return value;
-  }
-  if (value is num) {
-    return value.toDouble();
-  }
-  if (value is String) {
-    return double.tryParse(value.replaceAll(',', '.')) ?? 0;
-  }
-  return 0;
 }
