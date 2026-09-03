@@ -134,10 +134,11 @@ class _PlayerState extends State<_Player> {
   }
 
   Future<void> _initializePlayer() async {
+    // Le token de session est déjà encodé dans l'URL (?token=...) et propagé
+    // à chaque sous-ressource par le backend : aucun en-tête requis.
     final controller = VideoPlayerController.networkUrl(
       Uri.parse(widget.access.url),
       formatHint: VideoFormat.hls,
-      httpHeaders: widget.access.httpHeaders,
     );
     _controller = controller;
     controller.addListener(_onChanged);

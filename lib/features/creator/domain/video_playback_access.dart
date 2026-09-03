@@ -1,33 +1,15 @@
-import '../../../shared/utils/json_helpers.dart';
-
+/// Résultat prêt à l'emploi d'une session de lecture
+/// (`POST /videos/{id}/playback-session`) : l'URL du manifeste HLS proxié
+/// et réécrit par le backend (`/stream/{id}/master.m3u8?token=...`), déjà
+/// authentifiée via son paramètre `token` — aucun en-tête HTTP requis.
 class VideoPlaybackAccess {
   const VideoPlaybackAccess({
     required this.url,
-    required this.expiresIn,
-    this.sessionToken,
+    this.expiresAt,
     this.watermark,
-    this.httpHeaders = const {},
   });
 
   final String url;
-  final int expiresIn;
-  final String? sessionToken;
+  final DateTime? expiresAt;
   final String? watermark;
-  final Map<String, String> httpHeaders;
-
-  factory VideoPlaybackAccess.fromJson(Map<String, dynamic> json) {
-    return VideoPlaybackAccess(
-      url:
-          jsonNullableString(json['url']) ??
-          jsonNullableString(json['playback_url']) ??
-          jsonNullableString(json['stream_url']) ??
-          '',
-      expiresIn: jsonInt(json['expires_in']),
-      sessionToken:
-          jsonNullableString(json['token']) ??
-          jsonNullableString(json['session_token']) ??
-          jsonNullableString(json['playback_token']),
-      watermark: jsonNullableString(json['watermark']),
-    );
-  }
 }

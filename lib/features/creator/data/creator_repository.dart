@@ -91,40 +91,23 @@ class CreatorRepository {
     throw _apiException(response);
   }
 
+  /// Session de lecture (`POST /videos/{id}/playback-session`) puis flux
+  /// HLS proxié et déchiffré via `/stream/{id}/master.m3u8?token=...`.
+  ///
+  /// C'est le seul chemin qui fonctionne réellement : le manifeste HLS
+  /// généré par le worker référence ses sous-playlists de qualité, ses
+  /// segments .ts et sa clé de déchiffrement AES-128 par chemins RELATIFS
+  /// sans signature propre (`app/workers/video_processing.py`). Une URL
+  /// pré-signée S3/R2 brute (l'ancien endpoint `/videos/{id}/access`) ne
+  /// signe que le fichier demandé : le lecteur charge le master.m3u8 avec
+  /// succès puis échoue silencieusement sur chaque sous-ressource, faute
+  /// de token. Seul `/stream/...` réécrit chaque URI référencée pour y
+  /// propager le token de session (`streaming.py::rewrite_master_manifest`
+  /// / `rewrite_index_manifest`).
   Future<VideoPlaybackAccess> loadVideoPlaybackAccess(String videoId) async {
     final accessToken = await _requireAccessToken();
-    final accessResponse = await _client.get(
-      _apiUri('/api/v1/videos/$videoId/access'),
-      headers: _authHeaders(accessToken),
-    );
-
-    if (_isSuccess(accessResponse)) {
-      final access = VideoPlaybackAccess.fromJson(
-        _decodeObject(accessResponse.body),
-      );
-      final legacyAccess = _playbackAccessFromUrl(access, accessToken);
-      if (legacyAccess != null) {
-        return legacyAccess;
-      }
-    }
-
-    final sessionAccess = await _tryLoadPlaybackSession(videoId, accessToken);
-    if (sessionAccess != null) {
-      return sessionAccess;
-    }
-
-    if (_isSuccess(accessResponse)) {
-      throw const ApiException('Lien de lecture invalide.');
-    }
-
-    throw _apiException(accessResponse);
-  }
-
-  Future<VideoPlaybackAccess?> _tryLoadPlaybackSession(
-    String videoId,
-    String accessToken,
-  ) async {
     final deviceId = await _tokenStorage.readOrCreateDeviceId();
+
     final response = await _client.post(
       _apiUri(
         '/api/v1/videos/$videoId/playback-session',
@@ -133,13 +116,15 @@ class CreatorRepository {
     );
 
     if (!_isSuccess(response)) {
-      return null;
+      throw _apiException(response);
     }
 
-    final session = VideoPlaybackAccess.fromJson(_decodeObject(response.body));
-    final sessionToken = session.sessionToken;
+    // Réponse réelle de POST /videos/{id}/playback-session :
+    // { "token": str, "expires_at": ISO datetime, "watermark": str }
+    final decoded = _decodeObject(response.body);
+    final sessionToken = jsonNullableString(decoded['token']);
     if (sessionToken == null || sessionToken.isEmpty) {
-      return _playbackAccessFromUrl(session, accessToken);
+      throw const ApiException('Session de lecture invalide.');
     }
 
     final streamUrl = _apiUri(
@@ -148,9 +133,8 @@ class CreatorRepository {
 
     return VideoPlaybackAccess(
       url: streamUrl,
-      expiresIn: session.expiresIn,
-      sessionToken: sessionToken,
-      watermark: session.watermark,
+      expiresAt: jsonDate(decoded['expires_at']),
+      watermark: jsonNullableString(decoded['watermark']),
     );
   }
 
@@ -565,60 +549,6 @@ class CreatorRepository {
 
   Uri _apiUri(String path) {
     return Uri.parse(ApiConfig.baseUrl).resolve(path);
-  }
-
-  VideoPlaybackAccess? _playbackAccessFromUrl(
-    VideoPlaybackAccess access,
-    String accessToken,
-  ) {
-    final resolvedUrl = _resolvePlaybackUrl(access.url);
-    if (resolvedUrl.isEmpty) {
-      return null;
-    }
-
-    return VideoPlaybackAccess(
-      url: resolvedUrl,
-      expiresIn: access.expiresIn,
-      sessionToken: access.sessionToken,
-      watermark: access.watermark,
-      httpHeaders: _playbackHeadersFor(resolvedUrl, accessToken),
-    );
-  }
-
-  String _resolvePlaybackUrl(String rawUrl) {
-    final trimmed = rawUrl.trim();
-    if (trimmed.isEmpty) {
-      return '';
-    }
-
-    final uri = Uri.tryParse(trimmed);
-    if (uri == null) {
-      return '';
-    }
-    if (uri.hasScheme) {
-      return uri.toString();
-    }
-
-    return _apiUri(trimmed).toString();
-  }
-
-  Map<String, String> _playbackHeadersFor(
-    String playbackUrl,
-    String accessToken,
-  ) {
-    final playbackUri = Uri.tryParse(playbackUrl);
-    final apiUri = Uri.tryParse(ApiConfig.baseUrl);
-    if (playbackUri == null || apiUri == null) {
-      return const {};
-    }
-
-    final sameOrigin =
-        playbackUri.scheme == apiUri.scheme && playbackUri.host == apiUri.host;
-    if (!sameOrigin) {
-      return const {};
-    }
-
-    return {'Authorization': 'Bearer $accessToken'};
   }
 
   bool _isSuccess(http.Response response) {
