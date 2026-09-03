@@ -129,7 +129,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   Future<void> _pickFile() async {
     setState(() => _picking = true);
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.video,
       );
       final files = result?.files ?? const [];

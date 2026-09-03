@@ -7,7 +7,10 @@ plugins {
 
 android {
     namespace = "com.example.gnplay"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_plugin_android_lifecycle (dépendance transitive de file_picker)
+    // exige compileSdk >= 36 ; le compileSdkVersion embarqué par ce SDK
+    // Flutter est encore à 34.
+    compileSdk = maxOf(flutter.compileSdkVersion, 36)
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

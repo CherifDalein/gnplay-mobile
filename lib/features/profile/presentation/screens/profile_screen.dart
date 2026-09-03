@@ -219,7 +219,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _pickAvatar() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    final result = await FilePicker.pickFiles(type: FileType.image);
     final path = result?.files.firstOrNull?.path;
     if (path == null || !mounted) {
       return;

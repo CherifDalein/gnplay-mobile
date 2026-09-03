@@ -365,64 +365,76 @@ class _TopVideoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GnCard(
-      padding: const EdgeInsets.all(10),
+      padding: EdgeInsets.zero,
       radius: 14,
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.sm),
-            child: SizedBox(
-              width: 74,
-              height: 48,
-              child: video.thumbnailUrl == null || video.thumbnailUrl!.isEmpty
-                  ? const _ThumbnailPlaceholder()
-                  : Image.network(video.thumbnailUrl!, fit: BoxFit.cover),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => context.go('/videos/${video.videoId}'),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
               children: [
-                Text(
-                  video.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppTextStyles.label.copyWith(
-                    color: AppColors.text1,
-                    fontWeight: FontWeight.w600,
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
+                  child: SizedBox(
+                    width: 74,
+                    height: 48,
+                    child:
+                        video.thumbnailUrl == null ||
+                            video.thumbnailUrl!.isEmpty
+                        ? const _ThumbnailPlaceholder()
+                        : Image.network(video.thumbnailUrl!, fit: BoxFit.cover),
                   ),
                 ),
-                const SizedBox(height: 4),
-                RichText(
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  text: TextSpan(
-                    style: AppTextStyles.caption.copyWith(
-                      color: AppColors.text3,
-                      fontSize: 11,
-                    ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      TextSpan(
-                        text: '${formatGrouped(video.viewCount)} vues · ',
+                      Text(
+                        video.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyles.label.copyWith(
+                          color: AppColors.text1,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                      TextSpan(
-                        text: formatMoney(video.revenue),
-                        style: const TextStyle(color: AppColors.accent300),
+                      const SizedBox(height: 4),
+                      RichText(
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        text: TextSpan(
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.text3,
+                            fontSize: 11,
+                          ),
+                          children: [
+                            TextSpan(
+                              text: '${formatGrouped(video.viewCount)} vues · ',
+                            ),
+                            TextSpan(
+                              text: formatMoney(video.revenue),
+                              style: const TextStyle(color: AppColors.accent300),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
+                const GnLineIcon(
+                  GnLineIconData.chevronRight,
+                  color: AppColors.text4,
+                  size: 16,
+                ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          const GnLineIcon(
-            GnLineIconData.chevronRight,
-            color: AppColors.text4,
-            size: 16,
-          ),
-        ],
+        ),
       ),
     );
   }
