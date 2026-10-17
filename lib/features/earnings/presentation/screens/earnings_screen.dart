@@ -9,6 +9,8 @@ import '../../../creator/domain/creator_dashboard.dart';
 import '../../../creator/domain/wallet_ledger_entry.dart';
 import '../../../creator/presentation/providers/creator_dashboard_provider.dart';
 import '../../../creator/presentation/providers/creator_wallet_provider.dart';
+import '../../../creator/presentation/widgets/creator_content_widgets.dart';
+import '../widgets/topup_sheet.dart';
 
 class EarningsScreen extends ConsumerStatefulWidget {
   const EarningsScreen({super.key});
@@ -24,11 +26,6 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
   Widget build(BuildContext context) {
     final dashboardState = ref.watch(creatorDashboardProvider);
     final ledgerState = ref.watch(creatorWalletLedgerProvider);
-    final dashboard = dashboardState.valueOrNull ?? CreatorDashboard.sample();
-    final ledger = ledgerState.valueOrNull;
-    final entries = ledger == null || ledger.isEmpty
-        ? WalletLedgerEntry.sample()
-        : ledger;
 
     return Scaffold(
       backgroundColor: AppColors.bgApp,
@@ -42,15 +39,18 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
               ref.invalidate(creatorDashboardProvider);
               ref.invalidate(creatorWalletLedgerProvider);
               await Future.wait([
-                ref.read(creatorDashboardProvider.future).catchError((_) {
-                  return dashboard;
-                }),
-                ref.read(creatorWalletLedgerProvider.future).catchError((_) {
-                  return entries;
-                }),
+                ref
+                    .read(creatorDashboardProvider.future)
+                    .then((_) {})
+                    .catchError((_) {}),
+                ref
+                    .read(creatorWalletLedgerProvider.future)
+                    .then((_) {})
+                    .catchError((_) {}),
               ]);
             },
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 116),
               children: [
                 Text(
@@ -61,33 +61,41 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _BalanceCards(
-                  dashboard: dashboard,
-                  onInfoTap: () {
-                    setState(() {
-                      _showTip = !_showTip;
-                    });
-                  },
-                ),
-                if (_showTip) ...[
-                  const SizedBox(height: 10),
-                  GnCard(
-                    radius: AppRadii.md,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 13,
-                      vertical: 11,
+                ...dashboardState.when(
+                  data: (dashboard) => [
+                    _BalanceCards(
+                      dashboard: dashboard,
+                      onInfoTap: () => setState(() => _showTip = !_showTip),
                     ),
-                    child: Text(
-                      'Le solde retirable ne compte que vos gains de ventes. '
-                      'Il peut être inférieur au portefeuille si vous avez '
-                      'rechargé votre compte pour acheter des vidéos.',
-                      style: AppTextStyles.caption.copyWith(
-                        color: AppColors.text2,
-                        height: 16 / 11,
+                    if (_showTip) ...[
+                      const SizedBox(height: 10),
+                      GnCard(
+                        radius: AppRadii.md,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 13,
+                          vertical: 11,
+                        ),
+                        child: Text(
+                          'Le solde retirable ne compte que vos gains de ventes. '
+                          'Il peut être inférieur au portefeuille si vous avez '
+                          'rechargé votre compte pour acheter des vidéos.',
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.text2,
+                            height: 16 / 11,
+                          ),
+                        ),
                       ),
+                    ],
+                  ],
+                  loading: () => const [GnLoadingState(topPadding: 40)],
+                  error: (error, _) => [
+                    GnAsyncError(
+                      message: friendlyErrorMessage(error),
+                      topPadding: 24,
+                      onRetry: () => ref.invalidate(creatorDashboardProvider),
                     ),
-                  ),
-                ],
+                  ],
+                ),
                 const SizedBox(height: 14),
                 Row(
                   children: [
@@ -102,7 +110,7 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                       label: 'Recharger',
                       variant: GnButtonVariant.ghost,
                       expand: false,
-                      onPressed: () {},
+                      onPressed: () => showTopupSheet(context),
                     ),
                   ],
                 ),
@@ -115,13 +123,40 @@ class _EarningsScreenState extends ConsumerState<EarningsScreen> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                ...entries.map(
-                  (entry) => _LedgerTile(
-                    entry: entry,
-                    onTap: entry.payoutId == null
-                        ? null
-                        : () => context.push('/payout/${entry.payoutId}'),
-                  ),
+                ...ledgerState.when(
+                  data: (entries) => entries.isEmpty
+                      ? [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 24),
+                            child: Text(
+                              'Aucune transaction pour le moment.',
+                              textAlign: TextAlign.center,
+                              style: AppTextStyles.caption.copyWith(
+                                color: AppColors.text3,
+                              ),
+                            ),
+                          ),
+                        ]
+                      : [
+                          for (final entry in entries)
+                            _LedgerTile(
+                              entry: entry,
+                              onTap: entry.payoutId == null
+                                  ? null
+                                  : () => context.push(
+                                      '/payout/${entry.payoutId}',
+                                    ),
+                            ),
+                        ],
+                  loading: () => const [GnLoadingState(topPadding: 30)],
+                  error: (error, _) => [
+                    GnAsyncError(
+                      message: friendlyErrorMessage(error),
+                      topPadding: 24,
+                      onRetry: () =>
+                          ref.invalidate(creatorWalletLedgerProvider),
+                    ),
+                  ],
                 ),
               ],
             ),

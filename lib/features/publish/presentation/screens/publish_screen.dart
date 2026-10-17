@@ -121,17 +121,16 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
     return switch (phase) {
       UploadPhase.uploadingParts || UploadPhase.finalizing => 3,
       UploadPhase.processing || UploadPhase.ready => 4,
-      UploadPhase.idle || UploadPhase.initializing || UploadPhase.failed =>
-        null,
+      UploadPhase.idle ||
+      UploadPhase.initializing ||
+      UploadPhase.failed => null,
     };
   }
 
   Future<void> _pickFile() async {
     setState(() => _picking = true);
     try {
-      final result = await FilePicker.pickFiles(
-        type: FileType.video,
-      );
+      final result = await FilePicker.pickFiles(type: FileType.video);
       final files = result?.files ?? const [];
       final file = files.isNotEmpty ? files.first : null;
       if (file != null && mounted) {
@@ -283,7 +282,10 @@ class _FileStep extends StatelessWidget {
                 border: Border.all(color: AppColors.border1, width: 1.5),
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 34),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 34,
+                ),
                 child: Column(
                   children: [
                     Container(
@@ -370,10 +372,7 @@ class _FileStep extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 20),
-          GnButton(
-            label: 'Continuer',
-            onPressed: onContinue,
-          ),
+          GnButton(label: 'Continuer', onPressed: onContinue),
         ],
       ),
     );
@@ -526,7 +525,10 @@ class _UploadingStep extends StatelessWidget {
             style: AppTextStyles.caption.copyWith(color: AppColors.text2),
           ),
           const SizedBox(height: 22),
-          GnProgressBar(value: finalizing ? 1 : progress.uploadFraction, height: 8),
+          GnProgressBar(
+            value: finalizing ? 1 : progress.uploadFraction,
+            height: 8,
+          ),
           const SizedBox(height: 12),
           Text(
             'Ne quittez pas l’application.\nEn cas de coupure, l’envoi reprendra où il s’est arrêté.',

@@ -1,20 +1,22 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/api_exception.dart';
+import '../../../../core/network/http_client_provider.dart';
 import '../../../auth/presentation/providers/auth_controller.dart';
 import '../../data/notification_repository.dart';
 import '../../domain/app_notification.dart';
 
 final notificationRepositoryProvider = Provider<NotificationRepository>((ref) {
-  return NotificationRepository();
+  return NotificationRepository(client: ref.watch(authenticatedClientProvider));
 });
 
-final notificationsProvider =
-    FutureProvider.autoDispose<List<AppNotification>>((ref) async {
-      final repository = ref.watch(notificationRepositoryProvider);
-      final accessToken = await _requireAccessToken(ref);
-      return repository.list(accessToken);
-    });
+final notificationsProvider = FutureProvider.autoDispose<List<AppNotification>>(
+  (ref) async {
+    final repository = ref.watch(notificationRepositoryProvider);
+    final accessToken = await _requireAccessToken(ref);
+    return repository.list(accessToken, limit: 100);
+  },
+);
 
 final unreadNotificationCountProvider = FutureProvider.autoDispose<int>((
   ref,

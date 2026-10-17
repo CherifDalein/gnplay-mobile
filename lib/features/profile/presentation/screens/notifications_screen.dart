@@ -54,9 +54,7 @@ class NotificationsScreen extends ConsumerWidget {
               children: [
                 Row(
                   children: [
-                    Expanded(
-                      child: _Header(onBack: () => _goBack(context)),
-                    ),
+                    Expanded(child: _Header(onBack: () => _goBack(context))),
                     if (hasUnread)
                       TextButton(
                         onPressed: mutationState.isLoading

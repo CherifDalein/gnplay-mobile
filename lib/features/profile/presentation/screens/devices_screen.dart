@@ -278,7 +278,10 @@ class _DeviceCard extends StatelessWidget {
               onPressed: isLoading ? null : onRevoke,
               style: TextButton.styleFrom(
                 foregroundColor: AppColors.danger,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(9),
                   side: BorderSide(
@@ -306,9 +309,7 @@ class _DeviceCard extends StatelessWidget {
     if (platform == null && lastSeen == null) {
       return 'Dernière activité inconnue';
     }
-    final seenLabel = lastSeen == null
-        ? ''
-        : ' · ${_relativeLabel(lastSeen)}';
+    final seenLabel = lastSeen == null ? '' : ' · ${_relativeLabel(lastSeen)}';
     return '${platform ?? 'Appareil'}$seenLabel';
   }
 

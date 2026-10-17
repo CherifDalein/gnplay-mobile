@@ -52,10 +52,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                 children: [
                   IconButton(
                     onPressed: () => context.go('/login'),
-                    icon: const Icon(
-                      Icons.arrow_back,
-                      color: AppColors.text2,
-                    ),
+                    icon: const Icon(Icons.arrow_back, color: AppColors.text2),
                     style: IconButton.styleFrom(
                       alignment: Alignment.centerLeft,
                       padding: EdgeInsets.zero,

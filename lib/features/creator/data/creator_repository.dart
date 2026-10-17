@@ -13,6 +13,7 @@ import '../domain/payout_balances.dart';
 import '../domain/payout_provider.dart';
 import '../domain/payout_request.dart';
 import '../domain/top_video.dart';
+import '../domain/topup.dart';
 import '../domain/video_analytics.dart';
 import '../domain/video_playback_access.dart';
 import '../domain/video_upload_init_response.dart';
@@ -32,7 +33,7 @@ class CreatorRepository {
     final user = await _getUser(accessToken);
     final analytics = await _getAnalytics(accessToken);
     final balances = await _getPayoutBalances(accessToken);
-    final videos = await _listMyVideos(accessToken, limit: 20, offset: 0);
+    final videos = await _listAllMyVideos(accessToken);
     final topVideos = _mergeTopVideos(analytics.topVideos, videos);
 
     return CreatorDashboard(
@@ -68,12 +69,30 @@ class CreatorRepository {
     );
   }
 
-  Future<List<VideoWithStats>> listMyVideos({
-    int limit = 20,
-    int offset = 0,
-  }) async {
+  /// Toutes les vidéos du créateur : `/videos/mine` plafonne à 100 par page,
+  /// on enchaîne donc les pages jusqu'à épuisement.
+  Future<List<VideoWithStats>> listMyVideos() async {
     final accessToken = await _requireAccessToken();
-    return _listMyVideos(accessToken, limit: limit, offset: offset);
+    return _listAllMyVideos(accessToken);
+  }
+
+  static const _videosPageSize = 100;
+  static const _maxVideoPages = 50;
+
+  Future<List<VideoWithStats>> _listAllMyVideos(String accessToken) async {
+    final all = <VideoWithStats>[];
+    for (var page = 0; page < _maxVideoPages; page++) {
+      final batch = await _listMyVideos(
+        accessToken,
+        limit: _videosPageSize,
+        offset: page * _videosPageSize,
+      );
+      all.addAll(batch);
+      if (batch.length < _videosPageSize) {
+        break;
+      }
+    }
+    return all;
   }
 
   Future<VideoAnalytics> loadVideoAnalytics(String videoId) async {
@@ -217,7 +236,9 @@ class CreatorRepository {
   }) async {
     final accessToken = await _requireAccessToken();
     final response = await _client.post(
-      Uri.parse('${ApiConfig.baseUrl}/api/v1/videos/upload/$videoId/parts/presign'),
+      Uri.parse(
+        '${ApiConfig.baseUrl}/api/v1/videos/upload/$videoId/parts/presign',
+      ),
       headers: _authHeaders(accessToken),
       body: jsonEncode({'upload_id': uploadId, 'parts': partNumbers}),
     );
@@ -251,7 +272,9 @@ class CreatorRepository {
 
     final etag = response.headers['etag'] ?? response.headers['ETag'];
     if (etag == null || etag.isEmpty) {
-      throw const ApiException('Le serveur de stockage n’a pas renvoyé d’ETag.');
+      throw const ApiException(
+        'Le serveur de stockage n’a pas renvoyé d’ETag.',
+      );
     }
     return etag.replaceAll('"', '');
   }
@@ -264,7 +287,9 @@ class CreatorRepository {
   }) async {
     final accessToken = await _requireAccessToken();
     final response = await _client.post(
-      Uri.parse('${ApiConfig.baseUrl}/api/v1/videos/upload/$videoId/parts/confirm'),
+      Uri.parse(
+        '${ApiConfig.baseUrl}/api/v1/videos/upload/$videoId/parts/confirm',
+      ),
       headers: _authHeaders(accessToken),
       body: jsonEncode({'part_number': partNumber, 'etag': etag, 'size': size}),
     );
@@ -322,10 +347,28 @@ class CreatorRepository {
     }
   }
 
+  /// Relance le transcodage d'une vidéo en échec (le fichier source est
+  /// conservé côté serveur) — réservé au propriétaire ou à un admin.
+  Future<void> retryTranscode(String videoId) async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.post(
+      Uri.parse(
+        '${ApiConfig.baseUrl}/api/v1/internal/videos/$videoId/retry-transcode',
+      ),
+      headers: _authHeaders(accessToken),
+    );
+
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+  }
+
   Future<ProcessingStatusResponse> getProcessingStatus(String videoId) async {
     final accessToken = await _requireAccessToken();
     final response = await _client.get(
-      Uri.parse('${ApiConfig.baseUrl}/api/v1/videos/$videoId/processing-status'),
+      Uri.parse(
+        '${ApiConfig.baseUrl}/api/v1/videos/$videoId/processing-status',
+      ),
       headers: _authHeaders(accessToken),
     );
 
@@ -377,6 +420,45 @@ class CreatorRepository {
     }
 
     throw _apiException(response);
+  }
+
+  /// Recharge du portefeuille : `POST /payments/topup/initiate` renvoie l'URL
+  /// de paiement DexPay à ouvrir dans le navigateur ainsi que la référence
+  /// à suivre via [getTopupStatus] (le crédit arrive par webhook).
+  Future<TopupCheckout> initiateTopup(int amount) async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.post(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/payments/topup/initiate'),
+      headers: _authHeaders(accessToken),
+      body: jsonEncode({'amount': amount}),
+    );
+
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+
+    final decoded = _decodeObject(response.body);
+    final url = jsonNullableString(decoded['payment_url']);
+    final reference = jsonNullableString(decoded['reference']);
+    if (url == null || reference == null) {
+      throw const ApiException('Lien de paiement indisponible.');
+    }
+    return TopupCheckout(paymentUrl: url, reference: reference);
+  }
+
+  Future<TopupStatus> getTopupStatus(String reference) async {
+    final accessToken = await _requireAccessToken();
+    final response = await _client.get(
+      Uri.parse('${ApiConfig.baseUrl}/api/v1/payments/topup/status/$reference'),
+      headers: _authHeaders(accessToken),
+    );
+
+    if (!_isSuccess(response)) {
+      throw _apiException(response);
+    }
+
+    final decoded = _decodeObject(response.body);
+    return TopupStatus.parse(jsonNullableString(decoded['status']));
   }
 
   Future<List<PayoutProviderOption>> listPayoutProviders() async {

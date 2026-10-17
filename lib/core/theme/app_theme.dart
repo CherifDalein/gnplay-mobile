@@ -171,7 +171,9 @@ class AppTheme {
     final base = ThemeData(
       brightness: Brightness.dark,
       useMaterial3: true,
-      textTheme: GoogleFonts.interTextTheme(ThemeData(brightness: Brightness.dark).textTheme),
+      textTheme: GoogleFonts.interTextTheme(
+        ThemeData(brightness: Brightness.dark).textTheme,
+      ),
     );
 
     return base.copyWith(

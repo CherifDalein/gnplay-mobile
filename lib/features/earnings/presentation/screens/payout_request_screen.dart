@@ -7,7 +7,7 @@ import '../../../../core/network/api_exception.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/utils/gn_formatters.dart';
 import '../../../../shared/widgets/design_system/gn_design_system.dart';
-import '../../../creator/domain/creator_dashboard.dart';
+import '../../../creator/presentation/widgets/creator_content_widgets.dart';
 import '../../../creator/domain/payout_provider.dart';
 import '../../../creator/presentation/providers/creator_dashboard_provider.dart';
 import '../../../creator/presentation/providers/payout_controller.dart';
@@ -37,9 +37,31 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
   @override
   Widget build(BuildContext context) {
     final dashboardState = ref.watch(creatorDashboardProvider);
-    final dashboard = dashboardState.valueOrNull ?? CreatorDashboard.sample();
+    final dashboard = dashboardState.valueOrNull;
+    if (dashboard == null) {
+      return Scaffold(
+        backgroundColor: AppColors.bgApp,
+        body: SafeArea(
+          child: GnAppBackground(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 40),
+              children: [
+                _Header(onBack: () => _goBack(context)),
+                dashboardState.hasError
+                    ? GnAsyncError(
+                        message: friendlyErrorMessage(dashboardState.error!),
+                        onRetry: () => ref.invalidate(creatorDashboardProvider),
+                      )
+                    : const GnLoadingState(),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     final providersState = ref.watch(payoutProviderOptionsProvider);
-    final providers = providersState.valueOrNull ?? const <PayoutProviderOption>[];
+    final providers =
+        providersState.valueOrNull ?? const <PayoutProviderOption>[];
     final payoutState = ref.watch(payoutControllerProvider);
     final isLoading = payoutState.isLoading;
 
@@ -48,7 +70,10 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
       _phoneController.text = dashboard.user.phoneNumber;
     }
 
-    final selectedProvider = providers.where((p) => p.shortName == _selectedProviderShortName).firstOrNull ??
+    final selectedProvider =
+        providers
+            .where((p) => p.shortName == _selectedProviderShortName)
+            .firstOrNull ??
         (providers.isNotEmpty ? providers.first : null);
     if (_selectedProviderShortName == null && selectedProvider != null) {
       _selectedProviderShortName = selectedProvider.shortName;
@@ -58,7 +83,8 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
     final minAmount = selectedProvider?.minAmount ?? 0;
     final belowMin = minAmount > 0 && amount > 0 && amount < minAmount;
     final insufficient = amount > dashboard.withdrawableBalance;
-    final canSubmit = amount > 0 &&
+    final canSubmit =
+        amount > 0 &&
         !belowMin &&
         !insufficient &&
         selectedProvider != null &&
@@ -128,7 +154,9 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
                       child: TextField(
                         controller: _amountController,
                         keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
                         onChanged: (_) => setState(() {}),
                         style: AppTextStyles.displayMd.copyWith(
                           color: AppColors.text1,
@@ -194,7 +222,9 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Center(
-                    child: CircularProgressIndicator(color: AppColors.accent500),
+                    child: CircularProgressIndicator(
+                      color: AppColors.accent500,
+                    ),
                   ),
                 )
               else if (providers.isEmpty)
@@ -207,12 +237,14 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
                   spacing: 9,
                   runSpacing: 9,
                   children: providers.map((provider) {
-                    final selected = provider.shortName == _selectedProviderShortName;
+                    final selected =
+                        provider.shortName == _selectedProviderShortName;
                     return _ProviderChip(
                       provider: provider,
                       selected: selected,
-                      onTap: () =>
-                          setState(() => _selectedProviderShortName = provider.shortName),
+                      onTap: () => setState(
+                        () => _selectedProviderShortName = provider.shortName,
+                      ),
                     );
                   }).toList(),
                 ),
@@ -243,7 +275,9 @@ class _PayoutRequestScreenState extends ConsumerState<PayoutRequestScreen> {
               ],
               const SizedBox(height: 18),
               GnButton(
-                label: isLoading ? 'Envoi de la demande…' : 'Confirmer le retrait',
+                label: isLoading
+                    ? 'Envoi de la demande…'
+                    : 'Confirmer le retrait',
                 isLoading: isLoading,
                 onPressed: canSubmit ? _submit : null,
               ),

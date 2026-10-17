@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/network/api_exception.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/utils/gn_formatters.dart';
 import '../../../../shared/widgets/design_system/gn_design_system.dart';
 import '../../domain/creator_dashboard.dart';
 import '../../domain/top_video.dart';
+import '../../../profile/presentation/providers/notification_provider.dart';
 import '../providers/creator_dashboard_provider.dart';
+import '../widgets/creator_content_widgets.dart';
 
 class CreatorDashboardScreen extends ConsumerWidget {
   const CreatorDashboardScreen({super.key});
@@ -17,7 +20,6 @@ class CreatorDashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dashboardState = ref.watch(creatorDashboardProvider);
-    final dashboard = dashboardState.valueOrNull ?? CreatorDashboard.sample();
 
     return Scaffold(
       backgroundColor: AppColors.bgApp,
@@ -33,25 +35,43 @@ class CreatorDashboardScreen extends ConsumerWidget {
               slivers: [
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 116),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate.fixed([
-                      _CreatorHeader(dashboard: dashboard),
-                      const SizedBox(height: 20),
-                      _BalanceCard(dashboard: dashboard),
-                      const SizedBox(height: 14),
-                      _StatsGrid(dashboard: dashboard),
-                      const SizedBox(height: 24),
-                      _TopVideosHeader(onTap: () => context.go('/videos')),
-                      const SizedBox(height: 12),
-                      ...dashboard.topVideos
-                          .take(5)
-                          .map(
-                            (video) => Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: _TopVideoTile(video: video),
+                  sliver: dashboardState.when(
+                    data: (dashboard) => SliverList(
+                      delegate: SliverChildListDelegate.fixed([
+                        _CreatorHeader(dashboard: dashboard),
+                        const SizedBox(height: 20),
+                        _BalanceCard(dashboard: dashboard),
+                        const SizedBox(height: 14),
+                        _StatsGrid(dashboard: dashboard),
+                        const SizedBox(height: 24),
+                        _TopVideosHeader(onTap: () => context.go('/videos')),
+                        const SizedBox(height: 12),
+                        if (dashboard.topVideos.isEmpty)
+                          const _NoVideosYet()
+                        else
+                          ...dashboard.topVideos
+                              .take(5)
+                              .map(
+                                (video) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: _TopVideoTile(video: video),
+                                ),
+                              ),
+                      ]),
+                    ),
+                    loading: () =>
+                        const SliverToBoxAdapter(child: GnLoadingState()),
+                    error: (error, _) => SliverToBoxAdapter(
+                      // 403 = compte « viewer » : l'espace créateur lui est
+                      // fermé tant qu'il n'a pas activé son profil.
+                      child: error is ApiException && error.statusCode == 403
+                          ? const _NotCreatorYet()
+                          : GnAsyncError(
+                              message: friendlyErrorMessage(error),
+                              onRetry: () =>
+                                  ref.invalidate(creatorDashboardProvider),
                             ),
-                          ),
-                    ]),
+                    ),
                   ),
                 ),
               ],
@@ -63,14 +83,15 @@ class CreatorDashboardScreen extends ConsumerWidget {
   }
 }
 
-class _CreatorHeader extends StatelessWidget {
+class _CreatorHeader extends ConsumerWidget {
   const _CreatorHeader({required this.dashboard});
 
   final CreatorDashboard dashboard;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final user = dashboard.user;
+    final unread = ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
 
     return Row(
       children: [
@@ -116,38 +137,61 @@ class _CreatorHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 12),
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            GnCard(
-              padding: EdgeInsets.zero,
-              radius: AppRadii.pill,
-              child: SizedBox(
-                width: 40,
-                height: 40,
-                child: Center(
-                  child: GnLineIcon(
-                    GnLineIconData.bell,
-                    color: AppColors.text2,
-                    size: 17,
+        Semantics(
+          button: true,
+          label: unread > 0
+              ? 'Notifications, $unread non lues'
+              : 'Notifications',
+          child: GestureDetector(
+            onTap: () => context.push('/notifications'),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const GnCard(
+                  padding: EdgeInsets.zero,
+                  radius: AppRadii.pill,
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Center(
+                      child: GnLineIcon(
+                        GnLineIconData.bell,
+                        color: AppColors.text2,
+                        size: 17,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                if (unread > 0)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppColors.accent500,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.bgApp, width: 2),
+                      ),
+                      child: Text(
+                        unread > 9 ? '9+' : '$unread',
+                        style: AppTextStyles.micro.copyWith(
+                          color: AppColors.bgApp,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          height: 1.1,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            Positioned(
-              top: 8,
-              right: 9,
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: AppColors.accent500,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.bgApp, width: 2),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ],
     );
@@ -328,6 +372,52 @@ class _StatsGrid extends StatelessWidget {
   }
 }
 
+class _NotCreatorYet extends StatelessWidget {
+  const _NotCreatorYet();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 60),
+      child: Column(
+        children: [
+          Text(
+            'Votre compte n’est pas encore créateur',
+            textAlign: TextAlign.center,
+            style: AppTextStyles.heading.copyWith(color: AppColors.text1),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Activez votre profil créateur pour publier des vidéos et suivre vos gains.',
+            textAlign: TextAlign.center,
+            style: AppTextStyles.caption.copyWith(color: AppColors.text3),
+          ),
+          const SizedBox(height: 20),
+          GnButton(
+            label: 'Devenir créateur',
+            onPressed: () => context.go('/become-creator'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoVideosYet extends StatelessWidget {
+  const _NoVideosYet();
+
+  @override
+  Widget build(BuildContext context) {
+    return GnCard(
+      radius: 14,
+      child: Text(
+        'Publiez votre première vidéo pour voir apparaître ici vos meilleures performances.',
+        style: AppTextStyles.caption.copyWith(color: AppColors.text3),
+      ),
+    );
+  }
+}
+
 class _TopVideosHeader extends StatelessWidget {
   const _TopVideosHeader({required this.onTap});
 
@@ -417,7 +507,9 @@ class _TopVideoTile extends StatelessWidget {
                             ),
                             TextSpan(
                               text: formatMoney(video.revenue),
-                              style: const TextStyle(color: AppColors.accent300),
+                              style: const TextStyle(
+                                color: AppColors.accent300,
+                              ),
                             ),
                           ],
                         ),

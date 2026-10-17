@@ -96,6 +96,9 @@ class _VideoDetailScreenState extends ConsumerState<VideoDetailScreen> {
                 onDelete: () => _confirmDelete(context, ref, video),
                 onOpenStats: () => context.go('/videos/${video.id}/stats'),
                 onOpenFullPlayer: () => _openFullPlayer(context, video),
+                onRetryProcessing: () => ref
+                    .read(videoMutationControllerProvider.notifier)
+                    .retryTranscode(video.id),
               ),
               AsyncData() => _NotFoundView(onBack: () => _goBack(context)),
               AsyncError(:final error) => ListView(
@@ -182,7 +185,8 @@ class _VideoDetailScreenState extends ConsumerState<VideoDetailScreen> {
   void _openFullPlayer(BuildContext context, VideoWithStats video) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => FullVideoPlayerScreen(videoId: video.id, title: video.title),
+        builder: (_) =>
+            FullVideoPlayerScreen(videoId: video.id, title: video.title),
         fullscreenDialog: true,
       ),
     );
@@ -226,6 +230,47 @@ class _NotFoundView extends StatelessWidget {
   }
 }
 
+class _FailedBanner extends StatelessWidget {
+  const _FailedBanner({required this.isLoading, required this.onRetry});
+
+  final bool isLoading;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.dangerBg,
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Le traitement de cette vidéo a échoué.',
+              style: AppTextStyles.label.copyWith(color: AppColors.danger),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Votre fichier est conservé : relancez le traitement sans tout renvoyer.',
+              style: AppTextStyles.caption.copyWith(color: AppColors.text2),
+            ),
+            const SizedBox(height: 12),
+            GnButton(
+              label: 'Relancer le traitement',
+              isLoading: isLoading,
+              onPressed: isLoading ? null : onRetry,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _DetailContent extends StatelessWidget {
   const _DetailContent({
     required this.video,
@@ -236,6 +281,7 @@ class _DetailContent extends StatelessWidget {
     required this.onDelete,
     required this.onOpenStats,
     required this.onOpenFullPlayer,
+    required this.onRetryProcessing,
   });
 
   final VideoWithStats video;
@@ -246,6 +292,7 @@ class _DetailContent extends StatelessWidget {
   final VoidCallback onDelete;
   final VoidCallback onOpenStats;
   final VoidCallback onOpenFullPlayer;
+  final VoidCallback onRetryProcessing;
 
   @override
   Widget build(BuildContext context) {
@@ -253,13 +300,22 @@ class _DetailContent extends StatelessWidget {
 
     return CustomScrollView(
       slivers: [
-        SliverToBoxAdapter(child: _PreviewHero(video: video, onBack: onBack)),
+        SliverToBoxAdapter(
+          child: _PreviewHero(video: video, onBack: onBack),
+        ),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 18, 20, 116),
           sliver: SliverList(
             delegate: SliverChildListDelegate.fixed([
               _TitleBlock(video: video, onEdit: onEdit),
               const SizedBox(height: 18),
+              if (video.isFailed) ...[
+                _FailedBanner(
+                  isLoading: mutationState.isLoading,
+                  onRetry: onRetryProcessing,
+                ),
+                const SizedBox(height: 14),
+              ],
               _AnalyticsSection(videoId: video.id, video: video),
               const SizedBox(height: 14),
               GnButton(

@@ -61,7 +61,9 @@ class _PayoutDetailScreenState extends ConsumerState<PayoutDetailScreen> {
                 loading: () => const Padding(
                   padding: EdgeInsets.only(top: 80),
                   child: Center(
-                    child: CircularProgressIndicator(color: AppColors.accent500),
+                    child: CircularProgressIndicator(
+                      color: AppColors.accent500,
+                    ),
                   ),
                 ),
                 error: (error, stackTrace) => Padding(

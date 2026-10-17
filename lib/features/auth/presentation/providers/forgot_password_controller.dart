@@ -4,9 +4,10 @@ import '../../data/auth_repository.dart';
 import 'auth_repository_provider.dart';
 
 final forgotPasswordControllerProvider =
-    StateNotifierProvider.autoDispose<ForgotPasswordController, AsyncValue<void>>(
-      (ref) => ForgotPasswordController(ref.watch(authRepositoryProvider)),
-    );
+    StateNotifierProvider.autoDispose<
+      ForgotPasswordController,
+      AsyncValue<void>
+    >((ref) => ForgotPasswordController(ref.watch(authRepositoryProvider)));
 
 class ForgotPasswordController extends StateNotifier<AsyncValue<void>> {
   ForgotPasswordController(this._repository) : super(const AsyncData(null));

@@ -78,7 +78,10 @@ final videoPlaybackAccessProvider = FutureProvider.autoDispose
         // devices reached...") qui remplace l'originale, moins actionnable.
         await ref
             .watch(deviceRepositoryProvider)
-            .registerDevice(accessToken: authToken.accessToken, deviceId: deviceId);
+            .registerDevice(
+              accessToken: authToken.accessToken,
+              deviceId: deviceId,
+            );
 
         return await repository.loadVideoPlaybackAccess(videoId);
       }
@@ -91,9 +94,10 @@ final videoMutationControllerProvider =
     >((ref) => VideoMutationController(ref));
 
 final videoUploadControllerProvider =
-    StateNotifierProvider.autoDispose<VideoUploadController, VideoUploadProgress>(
-      (ref) => VideoUploadController(ref),
-    );
+    StateNotifierProvider.autoDispose<
+      VideoUploadController,
+      VideoUploadProgress
+    >((ref) => VideoUploadController(ref));
 
 class VideoMutationController extends StateNotifier<AsyncValue<void>> {
   VideoMutationController(this._ref) : super(const AsyncData(null));
@@ -138,6 +142,14 @@ class VideoMutationController extends StateNotifier<AsyncValue<void>> {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       await _ref.read(creatorRepositoryProvider).deleteVideo(videoId);
+      _invalidateVideoData(videoId);
+    });
+  }
+
+  Future<void> retryTranscode(String videoId) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      await _ref.read(creatorRepositoryProvider).retryTranscode(videoId);
       _invalidateVideoData(videoId);
     });
   }
@@ -190,6 +202,7 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
         repository: repository,
         file: file,
         videoId: init.videoId,
+        uploadId: init.uploadId,
         chunkSize: init.chunkSize,
         parts: init.parts,
       );
@@ -201,7 +214,10 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
         parts: confirmedParts,
       );
 
-      state = state.copyWith(phase: UploadPhase.processing, processingPercent: 0);
+      state = state.copyWith(
+        phase: UploadPhase.processing,
+        processingPercent: 0,
+      );
       await _pollProcessing(repository, init.videoId);
 
       state = state.copyWith(phase: UploadPhase.ready, processingPercent: 100);
@@ -216,6 +232,7 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
     required CreatorRepository repository,
     required PlatformFile file,
     required String videoId,
+    required String uploadId,
     required int chunkSize,
     required List<UploadPartTarget> parts,
   }) async {
@@ -228,7 +245,13 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
         final start = (part.partNumber - 1) * chunkSize;
         final length = math.min(chunkSize, file.size - start);
         final bytes = await _readChunk(file, start, length);
-        final etag = await repository.uploadChunk(part.uploadUrl, bytes);
+        final etag = await _withRetry(
+          repository: repository,
+          videoId: videoId,
+          uploadId: uploadId,
+          part: part,
+          action: (url) => repository.uploadChunk(url, bytes),
+        );
         await repository.confirmUploadPart(
           videoId,
           partNumber: part.partNumber,
@@ -241,13 +264,56 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
     }
 
     await Future.wait(
-      List.generate(math.min(_maxParallelUploads, parts.length), (_) => worker()),
+      List.generate(
+        math.min(_maxParallelUploads, parts.length),
+        (_) => worker(),
+      ),
     );
 
     final ordered = confirmed.keys.toList()..sort();
     return ordered
-        .map((partNumber) => (partNumber: partNumber, etag: confirmed[partNumber]!))
+        .map(
+          (partNumber) =>
+              (partNumber: partNumber, etag: confirmed[partNumber]!),
+        )
         .toList();
+  }
+
+  /// Un envoi de 10 Mo sur réseau mobile échoue souvent ponctuellement :
+  /// on retente 3 fois avec attente croissante, en redemandant une URL
+  /// pré-signée fraîche dès la deuxième tentative (l'ancienne a pu expirer).
+  Future<String> _withRetry({
+    required CreatorRepository repository,
+    required String videoId,
+    required String uploadId,
+    required UploadPartTarget part,
+    required Future<String> Function(String url) action,
+  }) async {
+    var url = part.uploadUrl;
+    const maxAttempts = 3;
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return await action(url);
+      } catch (error) {
+        final aborted = state.phase != UploadPhase.uploadingParts;
+        if (attempt >= maxAttempts || aborted) {
+          rethrow;
+        }
+        await Future<void>.delayed(Duration(seconds: attempt * 2));
+        try {
+          final fresh = await repository.presignUploadParts(
+            videoId,
+            uploadId: uploadId,
+            partNumbers: [part.partNumber],
+          );
+          if (fresh.isNotEmpty && fresh.first.uploadUrl.isNotEmpty) {
+            url = fresh.first.uploadUrl;
+          }
+        } catch (_) {
+          // On retente avec l'URL précédente.
+        }
+      }
+    }
   }
 
   Future<List<int>> _readChunk(PlatformFile file, int start, int length) async {

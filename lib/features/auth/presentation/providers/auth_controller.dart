@@ -8,7 +8,8 @@ import 'auth_repository_provider.dart';
 import 'device_repository_provider.dart';
 import 'token_storage_provider.dart';
 
-final authControllerProvider =
+final StateNotifierProvider<AuthController, AsyncValue<TokenResponse?>>
+authControllerProvider =
     StateNotifierProvider<AuthController, AsyncValue<TokenResponse?>>((ref) {
       return AuthController(
         ref.watch(authRepositoryProvider),
@@ -106,8 +107,18 @@ class AuthController extends StateNotifier<AsyncValue<TokenResponse?>> {
     });
   }
 
+  /// Appelé par le client HTTP quand le refresh token est refusé : le stockage
+  /// est déjà vidé, il ne reste qu'à repasser à l'état déconnecté (le routeur
+  /// renvoie alors vers /login).
+  void handleSessionExpired() {
+    if (!mounted) return;
+    state = const AsyncData(null);
+  }
+
+  // Le refresh token tourne à chaque renouvellement : le stockage est la seule
+  // source à jour, l'état en mémoire peut être périmé.
   Future<void> logout() async {
-    final currentToken = state.valueOrNull ?? await _tokenStorage.read();
+    final currentToken = await _tokenStorage.read() ?? state.valueOrNull;
     state = const AsyncLoading();
 
     try {
@@ -124,7 +135,7 @@ class AuthController extends StateNotifier<AsyncValue<TokenResponse?>> {
   }
 
   Future<void> logoutAllDevices() async {
-    final currentToken = state.valueOrNull ?? await _tokenStorage.read();
+    final currentToken = await _tokenStorage.read() ?? state.valueOrNull;
     state = const AsyncLoading();
 
     try {

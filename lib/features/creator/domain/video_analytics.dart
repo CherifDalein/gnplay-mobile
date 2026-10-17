@@ -40,17 +40,4 @@ class VideoAnalytics {
       revenue: jsonInt(json['revenue']),
     );
   }
-
-  factory VideoAnalytics.sample({String videoId = 'sample-1'}) {
-    return VideoAnalytics(
-      videoId: videoId,
-      views: 14208,
-      uniqueViewers: 11840,
-      completedViews: 10230,
-      averageCompletionRate: 72,
-      likesCount: 842,
-      purchasesCount: 123,
-      revenue: 1842000,
-    );
-  }
 }

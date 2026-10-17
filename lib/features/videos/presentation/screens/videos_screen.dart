@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -24,14 +26,25 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
   _VideoFilter _filter = _VideoFilter.all;
   bool _filtersOpen = false;
 
+  Timer? _processingPoller;
+
   @override
   void initState() {
     super.initState();
     _searchController.addListener(() => setState(() {}));
+    // Rafraîchit la liste tant qu'une vidéo est en cours de traitement, pour
+    // voir passer son statut à « prête » sans tirer pour rafraîchir.
+    _processingPoller = Timer.periodic(const Duration(seconds: 6), (_) {
+      final videos = ref.read(creatorVideosProvider).valueOrNull;
+      if (videos != null && videos.any((video) => video.isProcessing)) {
+        ref.invalidate(creatorVideosProvider);
+      }
+    });
   }
 
   @override
   void dispose() {
+    _processingPoller?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -94,7 +107,10 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
     );
   }
 
-  Widget _buildList(List<VideoWithStats> videos, AsyncValue<void> mutationState) {
+  Widget _buildList(
+    List<VideoWithStats> videos,
+    AsyncValue<void> mutationState,
+  ) {
     final filteredVideos = _filteredVideos(videos);
 
     return Column(
@@ -126,7 +142,9 @@ class _VideosScreenState extends ConsumerState<VideosScreen> {
                 video: video,
                 isLoading: mutationState.isLoading,
                 onOpen: () => context.go('/videos/${video.id}'),
-                onRetry: () => context.go('/publish'),
+                onRetry: () => ref
+                    .read(videoMutationControllerProvider.notifier)
+                    .retryTranscode(video.id),
                 onToggle: (value) => _togglePublish(video, value),
               ),
             ),
@@ -554,7 +572,7 @@ class _VideoCard extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            'Le transfert a échoué.',
+                            'Le traitement de la vidéo a échoué.',
                             style: AppTextStyles.micro.copyWith(
                               color: AppColors.danger,
                               fontWeight: FontWeight.w500,

@@ -30,8 +30,7 @@ class VideoUploadProgress {
       phase != UploadPhase.ready &&
       phase != UploadPhase.failed;
 
-  double get uploadFraction =>
-      totalParts == 0 ? 0 : uploadedParts / totalParts;
+  double get uploadFraction => totalParts == 0 ? 0 : uploadedParts / totalParts;
 
   VideoUploadProgress copyWith({
     UploadPhase? phase,

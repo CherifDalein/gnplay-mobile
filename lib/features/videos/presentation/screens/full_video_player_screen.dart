@@ -52,7 +52,9 @@ class FullVideoPlayerScreen extends ConsumerWidget {
                         ? 'Vous avez atteint la limite de 3 appareils actifs. Révoquez-en un pour regarder des vidéos sur celui-ci.'
                         : '$error',
                     textAlign: TextAlign.center,
-                    style: AppTextStyles.caption.copyWith(color: AppColors.text3),
+                    style: AppTextStyles.caption.copyWith(
+                      color: AppColors.text3,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   if (isDeviceLimit)
@@ -95,7 +97,9 @@ class _CenteredState extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        Center(child: Padding(padding: const EdgeInsets.all(24), child: child)),
+        Center(
+          child: Padding(padding: const EdgeInsets.all(24), child: child),
+        ),
         Positioned(
           top: 8,
           left: 8,

@@ -49,7 +49,10 @@ class DeviceRepository {
 
     final decoded = jsonDecode(response.body);
     if (decoded is List) {
-      return decoded.whereType<Map<String, dynamic>>().map(Device.fromJson).toList();
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(Device.fromJson)
+          .toList();
     }
     return const [];
   }

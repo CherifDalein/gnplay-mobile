@@ -29,8 +29,9 @@ class WalletLedgerEntry {
     if (direction == 'debit' && amount > 0) {
       amount = -amount;
     }
-    final referenceType = jsonNullableString(json['reference_type'])
-        ?.toLowerCase();
+    final referenceType = jsonNullableString(
+      json['reference_type'],
+    )?.toLowerCase();
 
     return WalletLedgerEntry(
       label: jsonString(json['description'], fallback: 'Mouvement'),
@@ -51,29 +52,6 @@ class WalletLedgerEntry {
     final day = parsed.day.toString().padLeft(2, '0');
     final month = parsed.month.toString().padLeft(2, '0');
     return '$day/$month/${parsed.year}';
-  }
-
-  static List<WalletLedgerEntry> sample() {
-    return const [
-      WalletLedgerEntry(
-        label: 'Vente vidéo',
-        dateLabel: 'Aujourd’hui',
-        amount: 1842000,
-        kind: WalletLedgerKind.sale,
-      ),
-      WalletLedgerEntry(
-        label: 'Retrait mobile money',
-        dateLabel: 'Hier',
-        amount: -750000,
-        kind: WalletLedgerKind.payout,
-      ),
-      WalletLedgerEntry(
-        label: 'Recharge portefeuille',
-        dateLabel: '12/08/2026',
-        amount: 250000,
-        kind: WalletLedgerKind.topup,
-      ),
-    ];
   }
 }
 

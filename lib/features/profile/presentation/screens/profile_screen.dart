@@ -9,7 +9,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/design_system/gn_design_system.dart';
 import '../../../auth/domain/user_read.dart';
 import '../../../auth/presentation/providers/auth_controller.dart';
-import '../../../creator/domain/creator_dashboard.dart';
+import '../../../creator/presentation/widgets/creator_content_widgets.dart';
 import '../../../creator/presentation/providers/creator_dashboard_provider.dart';
 import '../providers/notification_provider.dart';
 import '../providers/profile_controller.dart';
@@ -45,9 +45,25 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     });
 
     final dashboardState = ref.watch(creatorDashboardProvider);
-    final dashboard = dashboardState.valueOrNull ?? CreatorDashboard.sample();
+    final dashboard = dashboardState.valueOrNull;
+    if (dashboard == null) {
+      return Scaffold(
+        backgroundColor: AppColors.bgApp,
+        body: SafeArea(
+          child: GnAppBackground(
+            child: dashboardState.hasError
+                ? GnAsyncError(
+                    message: friendlyErrorMessage(dashboardState.error!),
+                    onRetry: () => ref.invalidate(creatorDashboardProvider),
+                  )
+                : const GnLoadingState(),
+          ),
+        ),
+      );
+    }
     final user = dashboard.user;
-    final unreadCount = ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
+    final unreadCount =
+        ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
     final isLoggingOut = ref.watch(authControllerProvider).isLoading;
 
     return Scaffold(
