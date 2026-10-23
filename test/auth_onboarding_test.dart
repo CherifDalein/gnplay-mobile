@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:gnplay/core/theme/app_theme.dart';
 import 'package:gnplay/features/auth/presentation/screens/login_screen.dart';
 import 'package:gnplay/features/auth/presentation/screens/register_screen.dart';
@@ -9,6 +10,11 @@ import 'package:gnplay/features/creator/presentation/screens/become_creator_scre
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() {
+    // Aucun accès réseau dans les tests : pas de téléchargement des polices.
+    GoogleFonts.config.allowRuntimeFetching = false;
+  });
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});

@@ -31,7 +31,7 @@ void main() {
     final repository = WalletRepository(
       testApi((request) async {
         if (request.url.path == '/api/v1/payments/topup/initiate') {
-          expect(bodyOf(request), {'amount': 25000});
+          expect(bodyOf(request), {'amount': 25000, 'client': 'mobile'});
           return jsonResponse({
             'payment_url': 'https://pay.test/checkout/1',
             'reference': 'topup_abc',

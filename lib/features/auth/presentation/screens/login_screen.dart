@@ -2,11 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/locale/countries.dart';
 import '../../../../core/network/api_exception.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/design_system/gn_design_system.dart';
 import '../../../../shared/widgets/gnplay_logo.dart';
 import '../providers/auth_controller.dart';
+import '../widgets/auth_error_text.dart';
+import '../widgets/auth_scaffold.dart';
+import '../widgets/auth_text_field.dart';
+import '../widgets/phone_field.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -19,7 +24,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _obscurePassword = true;
+  AppCountry _country = defaultCountry;
 
   @override
   void dispose() {
@@ -30,190 +35,100 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _login() async {
     FocusScope.of(context).unfocus();
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
 
     // En cas de succès, le routeur quitte /login de lui-même (créateur →
-    // tableau de bord, spectateur → « Devenir créateur »).
+    // tableau de bord, spectateur → « Devenir créateur »). Les champs ne sont
+    // pas vidés en cas d'échec : l'utilisateur corrige sans tout retaper.
     await ref
         .read(loginControllerProvider.notifier)
         .login(
-          phoneNumber: _phoneController.text.trim(),
+          phoneNumber: normalizePhoneNumber(
+            _phoneController.text,
+            country: _country,
+          )!,
           password: _passwordController.text,
         );
+  }
+
+  /// Un 401 à la connexion veut dire « identifiants incorrects » (le message
+  /// générique du socle parlerait de session expirée).
+  String _messageFor(Object error) {
+    if (error is ApiException && error.statusCode == 401) {
+      return 'Numéro de téléphone ou mot de passe incorrect.';
+    }
+    return authErrorMessage(error);
   }
 
   @override
   Widget build(BuildContext context) {
     final loginState = ref.watch(loginControllerProvider);
     final isLoading = loginState.isLoading;
-    final errorMessage = loginState.whenOrNull(
-      error: (error, _) => error is ApiException
-          ? error.message
-          : 'Une erreur inattendue est survenue.',
-    );
+    final error = loginState.error;
+    final compact = MediaQuery.sizeOf(context).height < 700;
 
-    return Scaffold(
-      backgroundColor: AppColors.bgApp,
-      body: SafeArea(
-        child: GnAppBackground(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(26, 38, 26, 32),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 430),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Center(child: GnplayLogo(height: 150)),
-                            const SizedBox(height: 34),
-                            Text(
-                              'Content de vous revoir',
-                              style: AppTextStyles.displayMd.copyWith(
-                                color: AppColors.text1,
-                                fontSize: 24,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Connectez-vous à votre espace créateur.',
-                              style: AppTextStyles.label.copyWith(
-                                color: AppColors.text3,
-                                fontWeight: FontWeight.w400,
-                              ),
-                            ),
-                            const SizedBox(height: 26),
-                            _FieldLabel(
-                              label: 'Numéro de téléphone',
-                              child: GnTextField(
-                                controller: _phoneController,
-                                placeholder: '+224 621 45 88 07',
-                                keyboardType: TextInputType.phone,
-                                textInputAction: TextInputAction.next,
-                                validator: (value) {
-                                  if (value == null ||
-                                      value.trim().length < 9) {
-                                    return 'Le numéro de téléphone est requis.';
-                                  }
-                                  return null;
-                                },
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            _FieldLabel(
-                              label: 'Mot de passe',
-                              child: GnTextField(
-                                controller: _passwordController,
-                                placeholder: '••••••••',
-                                obscureText: _obscurePassword,
-                                textInputAction: TextInputAction.done,
-                                onFieldSubmitted: (_) {
-                                  if (!isLoading) {
-                                    _login();
-                                  }
-                                },
-                                suffixIcon: TextButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _obscurePassword = !_obscurePassword;
-                                    });
-                                  },
-                                  child: Text(
-                                    _obscurePassword ? 'Voir' : 'Masquer',
-                                    style: AppTextStyles.micro.copyWith(
-                                      color: AppColors.accent500,
-                                    ),
-                                  ),
-                                ),
-                                validator: (value) {
-                                  if (value == null || value.isEmpty) {
-                                    return 'Le mot de passe est requis.';
-                                  }
-                                  return null;
-                                },
-                              ),
-                            ),
-                            if (errorMessage != null) ...[
-                              const SizedBox(height: 8),
-                              _ErrorText(message: errorMessage),
-                            ],
-                            const SizedBox(height: 22),
-                            GnButton(
-                              label: 'Se connecter',
-                              isLoading: isLoading,
-                              onPressed: _login,
-                            ),
-                            const SizedBox(height: 16),
-                            TextButton(
-                              onPressed: isLoading
-                                  ? null
-                                  : () => context.go('/forgot-password'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.text2,
-                              ),
-                              child: Text(
-                                'Mot de passe oublié ?',
-                                textAlign: TextAlign.center,
-                                style: AppTextStyles.label.copyWith(
-                                  color: AppColors.text2,
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 26),
-                            const _DividerWithText(label: 'ou'),
-                            const SizedBox(height: 18),
-                            GnButton(
-                              label: 'Créer un compte',
-                              variant: GnButtonVariant.secondary,
-                              onPressed: isLoading
-                                  ? null
-                                  : () => context.go('/register'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FieldLabel extends StatelessWidget {
-  const _FieldLabel({required this.label, required this.child});
-
-  final String label;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return AuthScaffold(
+      centered: true,
+      topPadding: compact ? 16 : 38,
       children: [
-        Text(
-          label,
-          style: AppTextStyles.caption.copyWith(
-            color: AppColors.text2,
-            fontWeight: FontWeight.w500,
+        Center(child: GnplayLogo(height: compact ? 96 : 150)),
+        SizedBox(height: compact ? 18 : 34),
+        const AuthHeading(
+          title: 'Content de vous revoir',
+          subtitle: Text('Connectez-vous à votre espace créateur.'),
+        ),
+        const SizedBox(height: 26),
+        Form(
+          key: _formKey,
+          child: AutofillGroup(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                PhoneField(
+                  controller: _phoneController,
+                  country: _country,
+                  enabled: !isLoading,
+                  onCountryChanged: (value) => setState(() => _country = value),
+                ),
+                const SizedBox(height: 14),
+                AuthPasswordField(
+                  controller: _passwordController,
+                  enabled: !isLoading,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) {
+                    if (!isLoading) _login();
+                  },
+                  validator: (value) => (value == null || value.isEmpty)
+                      ? 'Le mot de passe est requis.'
+                      : null,
+                ),
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 7),
-        child,
+        if (error != null) ...[
+          const SizedBox(height: 14),
+          GnBanner(tone: GnBannerTone.danger, message: _messageFor(error)),
+        ],
+        const SizedBox(height: 22),
+        GnButton(
+          label: 'Se connecter',
+          isLoading: isLoading,
+          onPressed: isLoading ? null : _login,
+        ),
+        const SizedBox(height: 4),
+        AuthTextLink(
+          label: 'Mot de passe oublié ?',
+          onPressed: isLoading ? null : () => context.push('/forgot-password'),
+        ),
+        const SizedBox(height: 14),
+        const _DividerWithText(label: 'ou'),
+        const SizedBox(height: 18),
+        GnButton(
+          label: 'Créer un compte',
+          variant: GnButtonVariant.secondary,
+          onPressed: isLoading ? null : () => context.push('/register'),
+        ),
       ],
     );
   }
@@ -238,20 +153,6 @@ class _DividerWithText extends StatelessWidget {
         ),
         const Expanded(child: Divider()),
       ],
-    );
-  }
-}
-
-class _ErrorText extends StatelessWidget {
-  const _ErrorText({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      message,
-      style: AppTextStyles.caption.copyWith(color: AppColors.danger),
     );
   }
 }

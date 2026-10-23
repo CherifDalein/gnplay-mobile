@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/network/api_exception.dart';
+import '../../../../core/locale/countries.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/design_system/gn_design_system.dart';
-import '../../domain/register_request.dart';
-import '../providers/auth_controller.dart';
+import '../../domain/auth_rules.dart';
+import '../../domain/code_request_outcome.dart';
 import '../providers/register_controller.dart';
-
-enum _RegisterStep { account, otp }
+import '../widgets/auth_error_text.dart';
+import '../widgets/auth_scaffold.dart';
+import '../widgets/auth_text_field.dart';
+import '../widgets/otp_code_section.dart';
+import '../widgets/phone_field.dart';
+import '../widgets/resend_countdown.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -21,579 +24,354 @@ class RegisterScreen extends ConsumerStatefulWidget {
 
 class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _accountFormKey = GlobalKey<FormState>();
-  final _otpFormKey = GlobalKey<FormState>();
 
   final _fullNameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
   final _codeController = TextEditingController();
+  final _countdown = ResendCountdown();
 
-  var _step = _RegisterStep.account;
-  bool _obscurePassword = true;
-
-  static const _countryIso2 = 'GN';
-  static const _countryLabel = 'Guinée (GNF)';
+  AppCountry _country = defaultCountry;
+  String? _codeError;
 
   @override
   void dispose() {
     _fullNameController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
+    _confirmController.dispose();
     _codeController.dispose();
+    _countdown.dispose();
     super.dispose();
   }
 
-  String get _phoneNumber => _phoneController.text.trim();
+  RegisterController get _controller =>
+      ref.read(registerControllerProvider.notifier);
 
-  Future<void> _continueToOtp() async {
+  /// Numéro saisi au format E.164 (null tant que le formulaire est invalide).
+  String? get _phone =>
+      normalizePhoneNumber(_phoneController.text, country: _country);
+
+  Future<void> _continue() async {
     FocusScope.of(context).unfocus();
-    if (!_accountFormKey.currentState!.validate()) {
+    if (!_accountFormKey.currentState!.validate()) return;
+    final phone = _phone!;
+    final flow = ref.read(registerControllerProvider);
+
+    // Retour pour corriger le nom ou le mot de passe : si le code vient d'être
+    // envoyé à ce numéro (ou que le numéro est déjà vérifié), inutile d'en
+    // redemander un, le serveur refuserait d'ailleurs avant une minute.
+    final alreadyVerified = flow.verifiedPhone == phone;
+    final recentlySent = flow.codeSentTo == phone && _countdown.isRunning;
+    if (alreadyVerified || recentlySent) {
+      _controller.showCodeStep(phone);
       return;
     }
-
-    final ok = await ref
-        .read(registerControllerProvider.notifier)
-        .requestOtp(phoneNumber: _phoneNumber);
-
-    if (!mounted || !ok) {
-      return;
-    }
-
-    setState(() => _step = _RegisterStep.otp);
+    await _requestCode(phone);
   }
 
-  Future<void> _resendOtp() async {
+  Future<void> _requestCode(String phone, {String? channel}) async {
     FocusScope.of(context).unfocus();
-    await ref
-        .read(registerControllerProvider.notifier)
-        .requestOtp(phoneNumber: _phoneNumber);
+    final outcome = await _controller.sendCode(phone, channel: channel);
+    if (!mounted) return;
+    if (outcome != CodeRequestOutcome.failed) _countdown.start();
+    if (outcome == CodeRequestOutcome.sent) {
+      _codeController.clear();
+      setState(() => _codeError = null);
+    }
   }
 
-  Future<void> _createAccount() async {
+  Future<void> _submit() async {
     FocusScope.of(context).unfocus();
-    if (!_otpFormKey.currentState!.validate()) {
+    final flow = ref.read(registerControllerProvider);
+    final phone = flow.codeSentTo!;
+    final verified = flow.verifiedPhone == phone;
+    final code = _codeController.text.trim();
+
+    if (!verified && code.length != otpCodeLength) {
+      setState(() => _codeError = 'Entrez le code à $otpCodeLength chiffres.');
       return;
     }
 
-    final registerController = ref.read(registerControllerProvider.notifier);
-    final otpOk = await registerController.verifyOtp(
-      phoneNumber: _phoneNumber,
-      code: _codeController.text.trim(),
-    );
-    if (!mounted || !otpOk) {
-      return;
-    }
-
-    final request = RegisterRequest(
+    final outcome = await _controller.submit(
       fullName: _fullNameController.text.trim(),
-      phoneNumber: _phoneNumber,
-      countryIso2: _countryIso2,
+      country: _country,
+      phone: phone,
       password: _passwordController.text,
+      code: code,
     );
-    final user = await registerController.register(request);
-    if (!mounted || user == null) {
-      return;
-    }
+    if (!mounted) return;
 
-    // Connexion automatique : le routeur envoie ensuite un nouveau compte
-    // (spectateur) vers « Devenir créateur ».
-    try {
-      await ref
-          .read(authControllerProvider.notifier)
-          .login(phoneNumber: _phoneNumber, password: _passwordController.text);
-    } catch (_) {
-      if (mounted) context.go('/login');
+    // Succès : le routeur redirige tout seul (nouveau compte spectateur →
+    // « Devenir créateur »).
+    if (outcome == RegisterOutcome.loginFailed) {
+      showGnToast(
+        context,
+        'Compte créé. Connectez-vous avec votre numéro et votre mot de passe.',
+        tone: GnToastTone.success,
+      );
+      context.go('/login');
+    }
+  }
+
+  void _back() {
+    final flow = ref.read(registerControllerProvider);
+    if (flow.step == RegisterStep.code) {
+      _controller.backToAccount();
+    } else if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      context.go('/login');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final registerState = ref.watch(registerControllerProvider);
-    final isLoading = registerState.isLoading;
-    final errorMessage = registerState.whenOrNull(
-      error: (error, _) => error is ApiException
-          ? error.message
-          : 'Une erreur inattendue est survenue.',
-    );
+    final flow = ref.watch(registerControllerProvider);
+    final onCodeStep = flow.step == RegisterStep.code;
 
-    return Scaffold(
-      backgroundColor: AppColors.bgApp,
-      body: SafeArea(
-        child: GnAppBackground(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(26, 22, 26, 32),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: constraints.maxHeight - 54,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: _BackButton(
-                          onPressed: isLoading
-                              ? null
-                              : () {
-                                  if (_step == _RegisterStep.otp) {
-                                    setState(() {
-                                      _step = _RegisterStep.account;
-                                    });
-                                    return;
-                                  }
-                                  context.go('/login');
-                                },
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      _ProgressBars(step: _step),
-                      const SizedBox(height: 20),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        child: _step == _RegisterStep.account
-                            ? _AccountStep(
-                                key: const ValueKey('account'),
-                                formKey: _accountFormKey,
-                                fullNameController: _fullNameController,
-                                phoneController: _phoneController,
-                                passwordController: _passwordController,
-                                countryLabel: _countryLabel,
-                                obscurePassword: _obscurePassword,
-                                onTogglePassword: () {
-                                  setState(() {
-                                    _obscurePassword = !_obscurePassword;
-                                  });
-                                },
-                                isLoading: isLoading,
-                                onContinue: _continueToOtp,
-                              )
-                            : _OtpStep(
-                                key: const ValueKey('otp'),
-                                formKey: _otpFormKey,
-                                codeController: _codeController,
-                                phoneNumber: _phoneNumber,
-                                isLoading: isLoading,
-                                onSubmit: _createAccount,
-                                onResend: _resendOtp,
-                              ),
-                      ),
-                      if (errorMessage != null) ...[
-                        const SizedBox(height: 14),
-                        _ErrorText(message: errorMessage),
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
+    return AuthScaffold(
+      children: [
+        Row(
+          children: [
+            GnBackButton(
+              alignment: Alignment.centerLeft,
+              // Pendant une requête : ne rien faire (null reviendrait à l'écran précédent).
+              onPressed: flow.busy ? () {} : _back,
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: _ProgressBars(onCodeStep: onCodeStep)),
+            const SizedBox(width: 44),
+          ],
+        ),
+        const SizedBox(height: 20),
+        if (onCodeStep) _buildCodeStep(flow) else _buildAccountStep(flow),
+      ],
+    );
+  }
+
+  Widget _buildAccountStep(RegisterFlowState flow) {
+    final error = flow.error;
+
+    return Form(
+      key: _accountFormKey,
+      child: AutofillGroup(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const AuthHeading(
+              title: 'Créer votre compte',
+              subtitle: Text('Étape 1 sur 2 · vos informations'),
+            ),
+            const SizedBox(height: 24),
+            AuthTextField(
+              controller: _fullNameController,
+              label: 'Nom complet',
+              placeholder: 'Mariama Diallo',
+              enabled: !flow.busy,
+              textCapitalization: TextCapitalization.words,
+              textInputAction: TextInputAction.next,
+              autofillHints: const [AutofillHints.name],
+              validator: (value) {
+                final length = value?.trim().length ?? 0;
+                if (length == 0) return 'Le nom complet est requis.';
+                if (length < minFullNameLength) {
+                  return 'Le nom doit contenir au moins $minFullNameLength '
+                      'caractères (prénom et nom).';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+            CountrySelectField(
+              country: _country,
+              enabled: !flow.busy,
+              onChanged: (value) => setState(() => _country = value),
+            ),
+            const SizedBox(height: 14),
+            PhoneField(
+              controller: _phoneController,
+              country: _country,
+              enabled: !flow.busy,
+              allowCountryChange: false,
+              onCountryChanged: (value) => setState(() => _country = value),
+            ),
+            const SizedBox(height: 14),
+            AuthPasswordField(
+              controller: _passwordController,
+              label: 'Mot de passe',
+              enabled: !flow.busy,
+              textInputAction: TextInputAction.next,
+              autofillHints: const [AutofillHints.newPassword],
+              validator: (value) =>
+                  (value == null || value.length < minPasswordLength)
+                  ? 'Le mot de passe doit contenir au moins '
+                        '$minPasswordLength caractères.'
+                  : null,
+            ),
+            const SizedBox(height: 14),
+            AuthPasswordField(
+              controller: _confirmController,
+              label: 'Confirmer le mot de passe',
+              enabled: !flow.busy,
+              textInputAction: TextInputAction.done,
+              autofillHints: const [AutofillHints.newPassword],
+              onFieldSubmitted: (_) {
+                if (!flow.busy) _continue();
+              },
+              validator: (value) => value != _passwordController.text
+                  ? 'Les mots de passe ne correspondent pas.'
+                  : null,
+            ),
+            if (error != null) ...[
+              const SizedBox(height: 14),
+              _ErrorBanner(error: error),
+            ],
+            const SizedBox(height: 24),
+            GnButton(
+              label: 'Continuer',
+              isLoading: flow.busy,
+              onPressed: flow.busy ? null : _continue,
+            ),
+            const SizedBox(height: 6),
+            AuthTextLink(
+              label: 'Déjà un compte ? Se connecter',
+              onPressed: flow.busy ? null : () => context.go('/login'),
+            ),
+          ],
         ),
       ),
     );
   }
-}
 
-class _AccountStep extends StatelessWidget {
-  const _AccountStep({
-    super.key,
-    required this.formKey,
-    required this.fullNameController,
-    required this.phoneController,
-    required this.passwordController,
-    required this.countryLabel,
-    required this.obscurePassword,
-    required this.onTogglePassword,
-    required this.isLoading,
-    required this.onContinue,
-  });
+  Widget _buildCodeStep(RegisterFlowState flow) {
+    final phone = flow.codeSentTo!;
+    final verified = flow.verifiedPhone == phone;
+    final error = flow.error;
 
-  final GlobalKey<FormState> formKey;
-  final TextEditingController fullNameController;
-  final TextEditingController phoneController;
-  final TextEditingController passwordController;
-  final String countryLabel;
-  final bool obscurePassword;
-  final VoidCallback onTogglePassword;
-  final bool isLoading;
-  final VoidCallback onContinue;
-
-  @override
-  Widget build(BuildContext context) {
-    return Form(
-      key: formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Créer votre compte',
-            style: AppTextStyles.displayMd.copyWith(
-              color: AppColors.text1,
-              fontSize: 24,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Étape 1 sur 2 · vos informations',
-            style: AppTextStyles.label.copyWith(
-              color: AppColors.text3,
-              fontWeight: FontWeight.w400,
-            ),
-          ),
-          const SizedBox(height: 24),
-          GnTextField(
-            controller: fullNameController,
-            label: 'Nom complet',
-            placeholder: 'Mariama Diallo',
-            textInputAction: TextInputAction.next,
-            validator: (value) {
-              if (value == null || value.trim().length < 6) {
-                return 'Le nom doit contenir au moins 6 caractères.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 13),
-          _CountryField(value: countryLabel),
-          const SizedBox(height: 13),
-          GnTextField(
-            controller: phoneController,
-            label: 'Numéro de téléphone',
-            placeholder: '+224 621 45 88 07',
-            keyboardType: TextInputType.phone,
-            textInputAction: TextInputAction.next,
-            validator: (value) {
-              if (value == null || value.trim().length < 9) {
-                return 'Le numéro de téléphone est requis.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 13),
-          GnTextField(
-            controller: passwordController,
-            label: 'Mot de passe',
-            placeholder: '••••••••',
-            obscureText: obscurePassword,
-            textInputAction: TextInputAction.done,
-            onFieldSubmitted: (_) {
-              if (!isLoading) {
-                onContinue();
-              }
-            },
-            suffixIcon: TextButton(
-              onPressed: onTogglePassword,
-              child: Text(
-                obscurePassword ? 'Voir' : 'Masquer',
-                style: AppTextStyles.micro.copyWith(color: AppColors.accent500),
-              ),
-            ),
-            validator: (value) {
-              if (value == null || value.length < 4) {
-                return 'Le mot de passe doit contenir au moins 4 caractères.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 24),
-          GnButton(
-            label: 'Continuer',
-            isLoading: isLoading,
-            onPressed: onContinue,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _OtpStep extends StatelessWidget {
-  const _OtpStep({
-    super.key,
-    required this.formKey,
-    required this.codeController,
-    required this.phoneNumber,
-    required this.isLoading,
-    required this.onSubmit,
-    required this.onResend,
-  });
-
-  final GlobalKey<FormState> formKey;
-  final TextEditingController codeController;
-  final String phoneNumber;
-  final bool isLoading;
-  final VoidCallback onSubmit;
-  final VoidCallback onResend;
-
-  @override
-  Widget build(BuildContext context) {
-    return Form(
-      key: formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Vérification',
-            style: AppTextStyles.displayMd.copyWith(
-              color: AppColors.text1,
-              fontSize: 24,
-            ),
-          ),
-          const SizedBox(height: 6),
-          RichText(
-            text: TextSpan(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const AuthHeading(title: 'Vérification'),
+        const SizedBox(height: 10),
+        if (verified) ...[
+          Text.rich(
+            TextSpan(
               style: AppTextStyles.label.copyWith(
                 color: AppColors.text3,
                 fontWeight: FontWeight.w400,
               ),
               children: [
-                const TextSpan(text: 'Code à 6 chiffres envoyé au '),
+                const TextSpan(text: 'Numéro vérifié : '),
                 TextSpan(
-                  text: phoneNumber,
-                  style: const TextStyle(color: AppColors.text1),
+                  text: formatPhoneNumber(phone),
+                  style: const TextStyle(
+                    color: AppColors.text1,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 28),
-          _OtpCodeField(controller: codeController),
           const SizedBox(height: 18),
-          TextButton(
-            onPressed: isLoading ? null : onResend,
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.text3,
-              padding: EdgeInsets.zero,
-              alignment: Alignment.centerLeft,
-            ),
-            child: RichText(
-              text: TextSpan(
-                style: AppTextStyles.caption.copyWith(color: AppColors.text3),
-                children: const [
-                  TextSpan(text: 'Renvoyer le code dans '),
-                  TextSpan(
-                    text: '00:45',
-                    style: TextStyle(
-                      color: AppColors.accent500,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          const GnBanner(
+            tone: GnBannerTone.success,
+            message:
+                'Votre numéro est vérifié. Il ne reste qu’à créer le compte, '
+                'sans nouveau code.',
           ),
-          const SizedBox(height: 26),
-          GnButton(
-            label: 'Vérifier',
-            isLoading: isLoading,
-            onPressed: onSubmit,
+        ] else
+          OtpCodeSection(
+            controller: _codeController,
+            phone: phone,
+            countdown: _countdown,
+            busy: flow.busy,
+            errorText: _codeError,
+            onChanged: (_) {
+              if (_codeError != null) setState(() => _codeError = null);
+            },
+            onSubmitted: (_) {
+              if (!flow.busy) _submit();
+            },
+            onEditPhone: _controller.backToAccount,
+            onResend: () => _requestCode(phone),
+            onResendBySms: () => _requestCode(phone, channel: otpChannelSms),
           ),
+        if (error != null) ...[
           const SizedBox(height: 14),
-          RichText(
-            text: TextSpan(
-              style: AppTextStyles.caption.copyWith(color: AppColors.text3),
-              children: const [
-                TextSpan(text: 'Votre compte est créé en tant que '),
-                TextSpan(
-                  text: 'spectateur',
-                  style: TextStyle(color: AppColors.text2),
-                ),
-                TextSpan(text: '. Vous pourrez passer créateur juste après.'),
-              ],
-            ),
-          ),
+          _ErrorBanner(error: error),
         ],
-      ),
-    );
-  }
-}
-
-class _OtpCodeField extends StatefulWidget {
-  const _OtpCodeField({required this.controller});
-
-  final TextEditingController controller;
-
-  @override
-  State<_OtpCodeField> createState() => _OtpCodeFieldState();
-}
-
-class _OtpCodeFieldState extends State<_OtpCodeField> {
-  final _focusNode = FocusNode();
-  String? _errorText;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_handleChanged);
-    _focusNode.addListener(_handleChanged);
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_handleChanged);
-    _focusNode.removeListener(_handleChanged);
-    _focusNode.dispose();
-    super.dispose();
-  }
-
-  void _handleChanged() {
-    if (mounted) {
-      if (_errorText != null && widget.controller.text.length == 6) {
-        _errorText = null;
-      }
-      setState(() {});
-    }
-  }
-
-  void _setError(String? message) {
-    if (_errorText == message) {
-      return;
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        setState(() {
-          _errorText = message;
-        });
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final code = widget.controller.text;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Stack(
-          children: [
-            GestureDetector(
-              onTap: _focusNode.requestFocus,
-              child: Row(
-                children: List.generate(6, (index) {
-                  final hasValue = index < code.length;
-                  final isActive = _focusNode.hasFocus && index == code.length;
-
-                  return Expanded(
-                    child: Padding(
-                      padding: EdgeInsets.only(right: index == 5 ? 0 : 9),
-                      child: AspectRatio(
-                        aspectRatio: 1 / 1.15,
-                        child: Container(
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: AppColors.surface1,
-                            borderRadius: BorderRadius.circular(AppRadii.md),
-                            border: Border.all(
-                              color: isActive
-                                  ? AppColors.accent500
-                                  : AppColors.border1,
-                            ),
-                          ),
-                          child: Text(
-                            hasValue ? code[index] : '',
-                            style: AppTextStyles.title.copyWith(
-                              color: AppColors.text1,
-                              fontSize: 20,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-            ),
-            Positioned.fill(
-              child: Opacity(
-                opacity: 0.01,
-                child: TextFormField(
-                  controller: widget.controller,
-                  focusNode: _focusNode,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  maxLengthEnforcement: MaxLengthEnforcement.enforced,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    border: InputBorder.none,
-                    counterText: '',
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().length != 6) {
-                      _setError('Entrez le code à 6 chiffres.');
-                      return '';
-                    }
-                    _setError(null);
-                    return null;
-                  },
-                ),
-              ),
-            ),
-          ],
+        const SizedBox(height: 22),
+        GnButton(
+          label: verified ? 'Créer mon compte' : 'Vérifier',
+          isLoading: flow.busy,
+          onPressed: flow.busy ? null : _submit,
         ),
-        if (_errorText != null) ...[
-          const SizedBox(height: AppSpacing.x2),
-          Text(
-            _errorText!,
-            style: AppTextStyles.caption.copyWith(color: AppColors.danger),
+        if (verified)
+          AuthTextLink(
+            label: 'Modifier le numéro',
+            onPressed: flow.busy ? null : _controller.backToAccount,
           ),
-        ],
+        const SizedBox(height: 14),
+        Text.rich(
+          TextSpan(
+            style: AppTextStyles.caption.copyWith(color: AppColors.text3),
+            children: const [
+              TextSpan(text: 'Votre compte est créé en tant que '),
+              TextSpan(
+                text: 'spectateur',
+                style: TextStyle(color: AppColors.text2),
+              ),
+              TextSpan(text: '. Vous pourrez passer créateur juste après.'),
+            ],
+          ),
+        ),
       ],
     );
   }
 }
 
-class _CountryField extends StatelessWidget {
-  const _CountryField({required this.value});
+/// Erreur du serveur ; propose la connexion si le compte existe déjà, et de
+/// renvoyer le code s'il a expiré.
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.error});
 
-  final String value;
+  final Object error;
 
   @override
   Widget build(BuildContext context) {
-    return GnCard(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      radius: AppRadii.md,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Pays',
-            style: AppTextStyles.micro.copyWith(color: AppColors.text3),
-          ),
-          const SizedBox(height: 3),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  value,
-                  style: AppTextStyles.body.copyWith(color: AppColors.text1),
-                ),
-              ),
-              Text(
-                '⌄',
-                style: AppTextStyles.heading.copyWith(color: AppColors.text3),
-              ),
-            ],
-          ),
-        ],
-      ),
+    var message = authErrorMessage(error);
+    final exists = isAccountExistsError(error);
+    if (isExpiredCodeError(error)) {
+      message = '$message Renvoyez un nouveau code pour continuer.';
+    }
+    return GnBanner(
+      tone: GnBannerTone.danger,
+      message: message,
+      actionLabel: exists ? 'Se connecter' : null,
+      onAction: exists ? () => context.go('/login') : null,
     );
   }
 }
 
 class _ProgressBars extends StatelessWidget {
-  const _ProgressBars({required this.step});
+  const _ProgressBars({required this.onCodeStep});
 
-  final _RegisterStep step;
+  final bool onCodeStep;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Expanded(child: _ProgressBar(isActive: true)),
-        const SizedBox(width: 6),
-        Expanded(child: _ProgressBar(isActive: step == _RegisterStep.otp)),
-      ],
+    return Semantics(
+      label: 'Étape ${onCodeStep ? 2 : 1} sur 2',
+      excludeSemantics: true,
+      child: Row(
+        children: [
+          const Expanded(child: _ProgressBar(isActive: true)),
+          const SizedBox(width: 6),
+          Expanded(child: _ProgressBar(isActive: onCodeStep)),
+        ],
+      ),
     );
   }
 }
@@ -611,67 +389,6 @@ class _ProgressBar extends StatelessWidget {
         color: isActive ? AppColors.accent500 : AppColors.border1,
         borderRadius: BorderRadius.circular(2),
       ),
-    );
-  }
-}
-
-class _BackButton extends StatelessWidget {
-  const _BackButton({required this.onPressed});
-
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: 'Retour',
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(AppRadii.sm),
-        child: const SizedBox(
-          width: 36,
-          height: 36,
-          child: CustomPaint(painter: _BackArrowPainter()),
-        ),
-      ),
-    );
-  }
-}
-
-class _BackArrowPainter extends CustomPainter {
-  const _BackArrowPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = AppColors.text2
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    final path = Path()
-      ..moveTo(size.width * 0.78, size.height * 0.5)
-      ..lineTo(size.width * 0.22, size.height * 0.5)
-      ..moveTo(size.width * 0.43, size.height * 0.25)
-      ..lineTo(size.width * 0.22, size.height * 0.5)
-      ..lineTo(size.width * 0.43, size.height * 0.75);
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _ErrorText extends StatelessWidget {
-  const _ErrorText({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      message,
-      style: AppTextStyles.caption.copyWith(color: AppColors.danger),
     );
   }
 }

@@ -77,6 +77,34 @@ void main() {
   });
 
   test(
+    'les messages français courts du serveur sont affichés tels quels',
+    () async {
+      for (final detail in [
+        'Utilisateur inexistant',
+        'Trop de tentatives, ressayez dans 1min',
+        "Ce pays n'existe pas",
+      ]) {
+        final api = testApi((_) async => jsonResponse({'detail': detail}, 400));
+        expect((await errorOf(api.get('/x'))).message, detail);
+      }
+    },
+  );
+
+  test(
+    'un message anglais inconnu est remplacé par un texte générique',
+    () async {
+      final api = testApi(
+        (_) async =>
+            jsonResponse({'detail': 'Offline download is restricted'}, 403),
+      );
+      expect(
+        (await errorOf(api.get('/x'))).message,
+        'Cette action n’est pas autorisée.',
+      );
+    },
+  );
+
+  test(
     'un message anglais connu est traduit, le texte brut reste accessible',
     () async {
       final api = testApi(

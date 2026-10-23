@@ -58,7 +58,7 @@ abstract final class ApiErrorMessages {
     if (text.isNotEmpty) {
       final known = _known[text.toLowerCase()];
       if (known != null) return known;
-      if (_looksFrench(text) && !_looksTechnical(text)) return text;
+      if (!_looksEnglish(text) && !_looksTechnical(text)) return text;
     }
     return forKind(ApiException.kindForStatus(statusCode));
   }
@@ -81,12 +81,18 @@ abstract final class ApiErrorMessages {
     };
   }
 
-  static final _frenchMarkers = RegExp(
-    r"[éèêàâçùûôîï]|\b(vous|votre|vos|le|la|les|des|du|une?|est|pas|déjà|veuillez|montant|numéro|compte|solde|retrait|code)\b",
+  // Les messages du backend destinés à l'utilisateur sont en français ; les
+  // messages techniques sont en anglais. On affiche donc tout ce qui ne
+  // ressemble pas à de l'anglais (« Utilisateur inexistant », « Trop de
+  // tentatives, ressayez dans 1min »…).
+  static final _englishMarkers = RegExp(
+    r"\b(the|not|is|are|was|be|must|cannot|can't|you|your|failed|invalid|denied|found|only|already|exceeded|required|missing|unsupported|error|this|for|of|to)\b",
     caseSensitive: false,
   );
 
-  static bool _looksFrench(String text) => _frenchMarkers.hasMatch(text);
+  static bool _looksEnglish(String text) =>
+      !RegExp(r'[éèêàâçùûôîï]').hasMatch(text) &&
+      _englishMarkers.hasMatch(text);
 
   /// Messages qui embarquent une exception technique (`…: {str(e)}`).
   static bool _looksTechnical(String text) =>

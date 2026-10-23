@@ -44,9 +44,18 @@ class AuthRepository {
   Future<void> logout({String? refreshToken}) =>
       _api.post('/api/v1/auth/logout', json: {'refresh_token': refreshToken});
 
-  Future<void> requestRegisterOtp({required String phoneNumber}) => _api.post(
+  /// [channel] : `whatsapp` ou `sms` pour forcer le canal d'envoi ; absent,
+  /// le serveur choisit (WhatsApp si possible, sinon SMS).
+  Future<void> requestRegisterOtp({
+    required String phoneNumber,
+    String? channel,
+  }) => _api.post(
     '/api/v1/auth/request-otp',
-    json: {'phone_number': phoneNumber, 'otp_type': 'register'},
+    json: {
+      'phone_number': phoneNumber,
+      'otp_type': 'register',
+      'channel': ?channel,
+    },
     authenticated: false,
   );
 
@@ -68,9 +77,17 @@ class AuthRepository {
     return UserRead.fromJson(json.asObject);
   }
 
-  Future<void> requestPasswordReset({required String phoneNumber}) => _api.post(
+  /// [channel] : voir [requestRegisterOtp].
+  Future<void> requestPasswordReset({
+    required String phoneNumber,
+    String? channel,
+  }) => _api.post(
     '/api/v1/auth/request-password-reset',
-    json: {'phone_number': phoneNumber, 'otp_type': 'reset_password'},
+    json: {
+      'phone_number': phoneNumber,
+      'otp_type': 'reset_password',
+      'channel': ?channel,
+    },
     authenticated: false,
   );
 
