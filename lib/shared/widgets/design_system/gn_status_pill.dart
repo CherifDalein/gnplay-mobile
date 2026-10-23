@@ -71,11 +71,11 @@ class GnStatusPill extends StatelessWidget {
         foreground: AppColors.info,
       ),
       GnStatusTone.neutral => const _StatusColors(
-        background: Color(0xFF22222A),
+        background: AppColors.surfaceNeutral,
         foreground: AppColors.text2,
       ),
       GnStatusTone.brand => const _StatusColors(
-        background: Color(0x38A8123B),
+        background: AppColors.brandTint22,
         foreground: AppColors.accent300,
       ),
     };

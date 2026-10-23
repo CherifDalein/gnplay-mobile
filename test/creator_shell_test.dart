@@ -5,11 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gnplay/core/theme/app_theme.dart';
-import 'package:gnplay/features/auth/data/token_storage.dart';
-import 'package:gnplay/features/creator/data/creator_repository.dart';
-import 'package:gnplay/features/creator/presentation/providers/creator_repository_provider.dart';
+import 'package:gnplay/core/network/http_client_provider.dart';
 import 'package:gnplay/features/creator/presentation/screens/creator_dashboard_screen.dart';
 import 'package:gnplay/features/earnings/presentation/screens/earnings_screen.dart';
+import 'package:gnplay/features/auth/domain/user_read.dart';
+import 'package:gnplay/features/profile/presentation/providers/current_user_provider.dart';
 import 'package:gnplay/features/profile/presentation/providers/notification_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -66,14 +66,25 @@ Widget _wrap(Widget child, {bool failing = false}) {
   final client = _fakeClient(failing: failing);
   return ProviderScope(
     overrides: [
-      creatorRepositoryProvider.overrideWithValue(
-        CreatorRepository(const TokenStorage(), client: client),
-      ),
+      httpClientProvider.overrideWithValue(client),
+      currentUserProvider.overrideWith((ref) async => _user),
       unreadNotificationCountProvider.overrideWith((ref) async => 3),
     ],
     child: MaterialApp(theme: AppTheme.dark, home: child),
   );
 }
+
+final _user = UserRead.fromJson(const {
+  'id': 'u1',
+  'full_name': 'Mariama Diallo',
+  'phone_number': '+224621458807',
+  'role': 'creator',
+  'is_active': true,
+  'is_superuser': false,
+  'is_verified': true,
+  'created_at': '2026-01-01T00:00:00Z',
+  'updated_at': '2026-01-01T00:00:00Z',
+});
 
 http.Client _fakeClient({required bool failing}) {
   http.Response ok(Object body) => http.Response(

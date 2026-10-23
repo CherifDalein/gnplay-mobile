@@ -109,11 +109,11 @@ class _HeroPanel extends StatelessWidget {
       height: 300,
       child: DecoratedBox(
         decoration: const BoxDecoration(gradient: AppGradients.brand),
-        child: const CustomPaint(
-          painter: _VerticalStripePainter(),
+        child: CustomPaint(
+          painter: const _VerticalStripePainter(),
           child: Stack(
             children: [
-              Positioned(
+              const Positioned(
                 left: 26,
                 top: 18,
                 child: Row(
@@ -132,11 +132,10 @@ class _HeroPanel extends StatelessWidget {
                 bottom: 26,
                 child: Text(
                   'Passez créateur\nsur GNPlay',
-                  style: TextStyle(
+                  style: AppTextStyles.display(
                     color: AppColors.text1,
-                    fontFamily: AppFonts.display,
-                    fontSize: 32,
-                    fontWeight: FontWeight.w800,
+                    size: 32,
+                    weight: FontWeight.w800,
                     height: 38 / 32,
                     letterSpacing: 0,
                   ),
@@ -199,11 +198,10 @@ class _CreatorBenefit extends StatelessWidget {
             ),
             child: Text(
               number,
-              style: AppTextStyles.label.copyWith(
+              style: AppTextStyles.display(
                 color: AppColors.accent500,
-                fontFamily: AppFonts.display,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+                size: 12,
+                weight: FontWeight.w700,
               ),
             ),
           ),

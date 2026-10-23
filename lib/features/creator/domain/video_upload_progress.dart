@@ -4,6 +4,10 @@ enum UploadPhase {
   uploadingParts,
   finalizing,
   processing,
+
+  /// Le suivi a été interrompu (délai dépassé) mais le traitement continue
+  /// côté serveur.
+  processingInBackground,
   ready,
   failed,
 }
@@ -28,6 +32,7 @@ class VideoUploadProgress {
   bool get isBusy =>
       phase != UploadPhase.idle &&
       phase != UploadPhase.ready &&
+      phase != UploadPhase.processingInBackground &&
       phase != UploadPhase.failed;
 
   double get uploadFraction => totalParts == 0 ? 0 : uploadedParts / totalParts;

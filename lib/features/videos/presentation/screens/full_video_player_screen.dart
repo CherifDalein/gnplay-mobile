@@ -132,13 +132,19 @@ class _PlayerState extends State<_Player> {
   Timer? _watermarkTimer;
   int _watermarkIndex = 0;
   bool _isInitializing = true;
+  // Mémorisé localement : sous Linux, media_kit peut remonter une erreur
+  // non fatale (ex. échec du décodage matériel puis repli logiciel) que
+  // video_player traduit par une remise à zéro de `controller.value`
+  // (isInitialized=false, taille 0). La vidéo continue pourtant de jouer, donc
+  // on ne s'appuie plus sur `value` pour savoir si le lecteur est prêt.
+  bool _started = false;
+  double _aspectRatio = 16 / 9;
   Object? _error;
 
   String get _watermark => widget.access.watermark?.trim() ?? '';
 
   bool get _isReady {
-    final controller = _controller;
-    return controller != null && controller.value.isInitialized;
+    return _controller != null && _started;
   }
 
   @override
@@ -167,6 +173,9 @@ class _PlayerState extends State<_Player> {
 
     try {
       await controller.initialize();
+      final ratio = controller.value.aspectRatio;
+      _aspectRatio = ratio > 0 ? ratio : 16 / 9;
+      _started = true;
       await controller.play();
       if (mounted) {
         setState(() => _isInitializing = false);
@@ -203,7 +212,7 @@ class _PlayerState extends State<_Player> {
 
   Future<void> _togglePlayback() async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
+    if (controller == null || !_started) {
       return;
     }
     if (controller.value.isPlaying) {
@@ -225,10 +234,8 @@ class _PlayerState extends State<_Player> {
         if (_isReady)
           Center(
             child: AspectRatio(
-              aspectRatio: controller!.value.aspectRatio == 0
-                  ? 16 / 9
-                  : controller.value.aspectRatio,
-              child: VideoPlayer(controller),
+              aspectRatio: _aspectRatio,
+              child: VideoPlayer(controller!),
             ),
           )
         else if (_isInitializing)
@@ -239,10 +246,23 @@ class _PlayerState extends State<_Player> {
           Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text(
-                'La lecture a échoué.',
-                textAlign: TextAlign.center,
-                style: AppTextStyles.body.copyWith(color: AppColors.text2),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'La lecture a échoué.',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.body.copyWith(color: AppColors.text2),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '$_error',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.caption.copyWith(
+                      color: AppColors.text3,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

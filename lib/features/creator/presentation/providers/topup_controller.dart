@@ -6,7 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/network/api_exception.dart';
 import '../../domain/topup.dart';
 import 'creator_dashboard_provider.dart';
-import 'creator_repository_provider.dart';
+import '../../../../core/network/repositories.dart';
 import 'creator_wallet_provider.dart';
 
 enum TopupPhase { idle, starting, awaitingPayment, completed, failed }
@@ -44,7 +44,7 @@ class TopupController extends StateNotifier<TopupState> {
     state = const TopupState(phase: TopupPhase.starting);
     try {
       final checkout = await _ref
-          .read(creatorRepositoryProvider)
+          .read(walletRepositoryProvider)
           .initiateTopup(amount);
       final opened = await launchUrl(
         Uri.parse(checkout.paymentUrl),
@@ -96,7 +96,7 @@ class TopupController extends StateNotifier<TopupState> {
   Future<void> _poll(String reference) async {
     try {
       final status = await _ref
-          .read(creatorRepositoryProvider)
+          .read(walletRepositoryProvider)
           .getTopupStatus(reference);
       if (!mounted || !status.isFinal) {
         return;

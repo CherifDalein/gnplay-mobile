@@ -27,8 +27,8 @@ class GnStatTile extends StatelessWidget {
               width: 26,
               height: 26,
               decoration: BoxDecoration(
-                color: AppColors.brand600.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(8),
+                color: AppColors.brandTint18,
+                borderRadius: BorderRadius.circular(AppRadii.xs),
               ),
               child: Center(
                 child: IconTheme(

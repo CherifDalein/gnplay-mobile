@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 
-enum GnButtonVariant { primary, secondary, ghost, danger }
+/// Variantes de [GnButton].
+///
+/// [danger] est un bouton à contour rouge (action destructive secondaire),
+/// [dangerFilled] un bouton plein rouge (confirmation d'une suppression).
+enum GnButtonVariant { primary, secondary, ghost, danger, dangerFilled }
 
 enum GnButtonSize { sm, md, lg }
 
-class GnButton extends StatelessWidget {
+class GnButton extends StatefulWidget {
   const GnButton({
     super.key,
     required this.label,
@@ -16,6 +20,7 @@ class GnButton extends StatelessWidget {
     this.isLoading = false,
     this.icon,
     this.expand = true,
+    this.height,
   });
 
   final String label;
@@ -26,12 +31,30 @@ class GnButton extends StatelessWidget {
   final Widget? icon;
   final bool expand;
 
+  /// Remplace la hauteur de [size] (ex. 48 pour les boutons d'une feuille).
+  final double? height;
+
+  @override
+  State<GnButton> createState() => _GnButtonState();
+}
+
+class _GnButtonState extends State<GnButton> {
+  bool _pressed = false;
+
+  String get label => widget.label;
+  VoidCallback? get onPressed => widget.onPressed;
+  GnButtonVariant get variant => widget.variant;
+  GnButtonSize get size => widget.size;
+  bool get isLoading => widget.isLoading;
+  Widget? get icon => widget.icon;
+  bool get expand => widget.expand;
+
   bool get _isDisabled => onPressed == null || isLoading;
 
   @override
   Widget build(BuildContext context) {
     final metrics = _metricsFor(size);
-    final colors = _colorsFor(variant, _isDisabled);
+    final colors = _colorsFor(variant, _isDisabled, _pressed);
 
     final child = AnimatedSwitcher(
       duration: const Duration(milliseconds: 150),
@@ -62,11 +85,11 @@ class GnButton extends StatelessWidget {
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: AppTextStyles.label.copyWith(
+                    // Sora via google_fonts : `fontFamily: 'Sora'` ne résout pas.
+                    style: AppTextStyles.display(
+                      size: metrics.fontSize,
+                      weight: FontWeight.w700,
                       color: colors.foreground,
-                      fontFamily: AppFonts.display,
-                      fontSize: metrics.fontSize,
-                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -75,7 +98,7 @@ class GnButton extends StatelessWidget {
     );
 
     return SizedBox(
-      height: metrics.height,
+      height: widget.height ?? metrics.height,
       width: expand ? double.infinity : null,
       child: DecoratedBox(
         decoration: BoxDecoration(
@@ -89,6 +112,9 @@ class GnButton extends StatelessWidget {
           color: Colors.transparent,
           child: InkWell(
             onTap: _isDisabled ? null : onPressed,
+            onHighlightChanged: (value) {
+              if (_pressed != value) setState(() => _pressed = value);
+            },
             borderRadius: BorderRadius.circular(AppRadii.md),
             child: Padding(
               padding: EdgeInsets.symmetric(horizontal: metrics.horizontal),
@@ -120,7 +146,11 @@ class GnButton extends StatelessWidget {
     };
   }
 
-  _ButtonColors _colorsFor(GnButtonVariant variant, bool disabled) {
+  _ButtonColors _colorsFor(
+    GnButtonVariant variant,
+    bool disabled,
+    bool pressed,
+  ) {
     if (disabled) {
       return const _ButtonColors(
         background: AppColors.surface3,
@@ -129,8 +159,8 @@ class GnButton extends StatelessWidget {
     }
 
     return switch (variant) {
-      GnButtonVariant.primary => const _ButtonColors(
-        background: AppColors.accent500,
+      GnButtonVariant.primary => _ButtonColors(
+        background: pressed ? AppColors.accent600 : AppColors.accent500,
         foreground: AppColors.textInverse,
       ),
       GnButtonVariant.secondary => const _ButtonColors(
@@ -146,7 +176,11 @@ class GnButton extends StatelessWidget {
       GnButtonVariant.danger => const _ButtonColors(
         background: Colors.transparent,
         foreground: AppColors.danger,
-        borderColor: Color(0x59FF5A5F),
+        borderColor: AppColors.dangerBorder,
+      ),
+      GnButtonVariant.dangerFilled => const _ButtonColors(
+        background: AppColors.danger,
+        foreground: AppColors.textInverse,
       ),
     };
   }

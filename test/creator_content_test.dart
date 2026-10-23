@@ -5,9 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gnplay/core/theme/app_theme.dart';
-import 'package:gnplay/features/auth/data/token_storage.dart';
-import 'package:gnplay/features/creator/data/creator_repository.dart';
-import 'package:gnplay/features/creator/presentation/providers/creator_repository_provider.dart';
+import 'package:gnplay/core/network/http_client_provider.dart';
 import 'package:gnplay/features/publish/presentation/screens/publish_screen.dart';
 import 'package:gnplay/features/videos/presentation/screens/video_detail_screen.dart';
 import 'package:gnplay/features/videos/presentation/screens/video_stats_screen.dart';
@@ -61,11 +59,7 @@ void main() {
 
 Widget _wrap(Widget child) {
   return ProviderScope(
-    overrides: [
-      creatorRepositoryProvider.overrideWithValue(
-        CreatorRepository(const TokenStorage(), client: _fakeClient()),
-      ),
-    ],
+    overrides: [httpClientProvider.overrideWithValue(_fakeClient())],
     child: MaterialApp(theme: AppTheme.dark, home: child),
   );
 }

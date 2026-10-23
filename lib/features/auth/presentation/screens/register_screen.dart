@@ -95,32 +95,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       return;
     }
 
-    ref.read(postAuthRedirectProvider.notifier).state = '/become-creator';
-    final token = await ref
-        .read(authControllerProvider.notifier)
-        .loginAfterRegistration(
-          phoneNumber: _phoneNumber,
-          password: _passwordController.text,
-        );
-
-    if (!mounted) {
-      return;
+    // Connexion automatique : le routeur envoie ensuite un nouveau compte
+    // (spectateur) vers « Devenir créateur ».
+    try {
+      await ref
+          .read(authControllerProvider.notifier)
+          .login(phoneNumber: _phoneNumber, password: _passwordController.text);
+    } catch (_) {
+      if (mounted) context.go('/login');
     }
-
-    if (token == null) {
-      ref.read(postAuthRedirectProvider.notifier).state = null;
-      context.go('/login');
-      return;
-    }
-
-    context.go(user.isCreator ? '/home' : '/become-creator');
   }
 
   @override
   Widget build(BuildContext context) {
     final registerState = ref.watch(registerControllerProvider);
-    final authState = ref.watch(authControllerProvider);
-    final isLoading = registerState.isLoading || authState.isLoading;
+    final isLoading = registerState.isLoading;
     final errorMessage = registerState.whenOrNull(
       error: (error, _) => error is ApiException
           ? error.message

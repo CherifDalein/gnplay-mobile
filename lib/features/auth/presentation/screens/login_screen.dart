@@ -34,23 +34,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
 
-    final token = await ref
-        .read(authControllerProvider.notifier)
+    // En cas de succès, le routeur quitte /login de lui-même (créateur →
+    // tableau de bord, spectateur → « Devenir créateur »).
+    await ref
+        .read(loginControllerProvider.notifier)
         .login(
           phoneNumber: _phoneController.text.trim(),
           password: _passwordController.text,
         );
-
-    if (!mounted || token == null) {
-      return;
-    }
-
-    context.go('/home');
   }
 
   @override
   Widget build(BuildContext context) {
-    final loginState = ref.watch(authControllerProvider);
+    final loginState = ref.watch(loginControllerProvider);
     final isLoading = loginState.isLoading;
     final errorMessage = loginState.whenOrNull(
       error: (error, _) => error is ApiException

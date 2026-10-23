@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:gnplay/core/theme/app_theme.dart';
 import 'package:gnplay/shared/widgets/design_system/gn_design_system.dart';
 
 void main() {
+  setUpAll(() {
+    // Aucun accès réseau dans les tests : pas de téléchargement des polices.
+    GoogleFonts.config.allowRuntimeFetching = false;
+  });
+
   testWidgets('design system primitives mount together', (tester) async {
     final controller = TextEditingController(text: '+224 621 45 88 07');
     addTearDown(controller.dispose);

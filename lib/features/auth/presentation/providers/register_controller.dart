@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/auth_repository.dart';
 import '../../domain/register_request.dart';
 import '../../domain/user_read.dart';
-import 'auth_repository_provider.dart';
+import '../../../../core/network/repositories.dart';
 
 final registerControllerProvider =
     StateNotifierProvider<RegisterController, AsyncValue<UserRead?>>((ref) {

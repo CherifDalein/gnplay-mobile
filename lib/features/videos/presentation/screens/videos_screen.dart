@@ -627,9 +627,7 @@ class _VideoCard extends StatelessWidget {
                     GnContentSwitch(
                       value: video.isPublished,
                       isLoading: isLoading,
-                      onChanged: video.isProcessing || video.isFailed
-                          ? null
-                          : onToggle,
+                      onChanged: video.canTogglePublish ? onToggle : null,
                     ),
                   ],
                 ),

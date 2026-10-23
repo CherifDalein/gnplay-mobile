@@ -353,10 +353,10 @@ class _LedgerTile extends StatelessWidget {
             const SizedBox(width: 12),
             Text(
               '${entry.amount >= 0 ? '+' : '-'}${formatMoney(entry.amount.abs())}',
-              style: AppTextStyles.label.copyWith(
+              style: AppTextStyles.display(
                 color: colors.foreground,
-                fontFamily: AppFonts.display,
-                fontWeight: FontWeight.w700,
+                size: 13,
+                weight: FontWeight.w700,
               ),
             ),
           ],

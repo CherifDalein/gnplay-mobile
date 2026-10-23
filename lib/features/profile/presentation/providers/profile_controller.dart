@@ -2,11 +2,10 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/network/api_exception.dart';
+import '../../../../core/network/repositories.dart';
 import '../../../auth/domain/user_read.dart';
-import '../../../auth/presentation/providers/auth_controller.dart';
-import '../../../auth/presentation/providers/auth_repository_provider.dart';
 import '../../../creator/presentation/providers/creator_dashboard_provider.dart';
+import 'current_user_provider.dart';
 
 final profileControllerProvider =
     StateNotifierProvider.autoDispose<ProfileController, AsyncValue<UserRead?>>(
@@ -24,40 +23,32 @@ class ProfileController extends StateNotifier<AsyncValue<UserRead?>> {
     String? bio,
   }) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      final accessToken = await _requireAccessToken();
+    final result = await AsyncValue.guard(() async {
       final user = await _ref
-          .read(authRepositoryProvider)
-          .updateProfile(
-            accessToken: accessToken,
-            fullName: fullName,
-            pageName: pageName,
-            bio: bio,
-          );
-      _ref.invalidate(creatorDashboardProvider);
+          .read(profileRepositoryProvider)
+          .update(fullName: fullName, pageName: pageName, bio: bio);
+      _refreshAccount();
       return user;
     });
-    return !state.hasError;
+    if (mounted) state = result;
+    return !result.hasError;
   }
 
   Future<bool> uploadAvatar(File file) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      final accessToken = await _requireAccessToken();
+    final result = await AsyncValue.guard<UserRead?>(() async {
       await _ref
-          .read(authRepositoryProvider)
-          .uploadProfilePicture(accessToken: accessToken, file: file);
-      _ref.invalidate(creatorDashboardProvider);
+          .read(profileRepositoryProvider)
+          .uploadProfilePicture(file.path);
+      _refreshAccount();
       return null;
     });
-    return !state.hasError;
+    if (mounted) state = result;
+    return !result.hasError;
   }
 
-  Future<String> _requireAccessToken() async {
-    final token = _ref.read(authControllerProvider).valueOrNull;
-    if (token == null) {
-      throw const ApiException('Vous devez vous connecter.');
-    }
-    return token.accessToken;
+  void _refreshAccount() {
+    _ref.invalidate(currentUserProvider);
+    _ref.invalidate(creatorDashboardProvider);
   }
 }

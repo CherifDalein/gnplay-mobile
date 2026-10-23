@@ -1,8 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/network/repositories.dart';
 import '../../../auth/domain/user_read.dart';
-import '../../../auth/presentation/providers/auth_repository_provider.dart';
-import '../../../auth/presentation/providers/token_storage_provider.dart';
+import '../../../profile/presentation/providers/current_user_provider.dart';
 import 'creator_dashboard_provider.dart';
 
 final becomeCreatorControllerProvider =
@@ -18,18 +18,13 @@ class BecomeCreatorController extends StateNotifier<AsyncValue<UserRead?>> {
   Future<UserRead?> becomeCreator() async {
     state = const AsyncLoading();
     try {
-      final token = await _ref.read(tokenStorageProvider).read();
-      if (token == null) {
-        throw Exception('Vous devez vous connecter.');
-      }
-      final user = await _ref
-          .read(authRepositoryProvider)
-          .becomeCreator(accessToken: token.accessToken);
+      final user = await _ref.read(profileRepositoryProvider).becomeCreator();
+      _ref.invalidate(currentUserProvider);
       _ref.invalidate(creatorDashboardProvider);
-      state = AsyncData(user);
+      if (mounted) state = AsyncData(user);
       return user;
     } catch (error, stackTrace) {
-      state = AsyncError(error, stackTrace);
+      if (mounted) state = AsyncError(error, stackTrace);
       return null;
     }
   }

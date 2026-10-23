@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../shared/widgets/shell_scaffold.dart';
@@ -11,6 +12,7 @@ import '../../features/creator/presentation/screens/creator_dashboard_screen.dar
 import '../../features/earnings/presentation/screens/earnings_screen.dart';
 import '../../features/earnings/presentation/screens/payout_detail_screen.dart';
 import '../../features/earnings/presentation/screens/payout_request_screen.dart';
+import '../../features/profile/presentation/providers/current_user_provider.dart';
 import '../../features/profile/presentation/screens/devices_screen.dart';
 import '../../features/profile/presentation/screens/notifications_screen.dart';
 import '../../features/profile/presentation/screens/profile_screen.dart';
@@ -20,41 +22,73 @@ import '../../features/videos/presentation/screens/video_detail_screen.dart';
 import '../../features/videos/presentation/screens/video_stats_screen.dart';
 import '../../features/videos/presentation/screens/videos_screen.dart';
 
-final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authControllerProvider);
-  final postAuthRedirect = ref.watch(postAuthRedirectProvider);
+/// Routes accessibles sans être connecté.
+const _publicRoutes = {'/login', '/register', '/forgot-password'};
 
-  return GoRouter(
+/// Routes réservées aux visiteurs : un utilisateur connecté en est renvoyé.
+const _guestOnlyRoutes = {'/login', '/register'};
+
+/// Routes ouvertes à un compte spectateur (pas encore créateur).
+const _viewerRoutes = {
+  '/become-creator',
+  '/settings',
+  '/devices',
+  '/notifications',
+  '/forgot-password',
+};
+
+/// Le routeur est créé UNE seule fois : le recréer à chaque changement de
+/// session détruisait la pile de navigation (formulaire de connexion vidé,
+/// redirections perdues). Il se réévalue via [refreshListenable] quand la
+/// session ou le rôle du compte changent.
+final routerProvider = Provider<GoRouter>((ref) {
+  final refresh = ValueNotifier<int>(0);
+  void bump() => refresh.value++;
+  ref.listen(authControllerProvider, (_, _) => bump());
+  ref.listen(currentUserProvider, (_, _) => bump());
+  ref.listen(postAuthRedirectProvider, (_, _) => bump());
+
+  final router = GoRouter(
     initialLocation: '/splash',
+    refreshListenable: refresh,
     redirect: (context, state) {
       final location = Uri.parse(state.location).path;
-      // Routes réservées aux visiteurs non connectés (redirigent vers /home
-      // si déjà authentifié).
-      final isAuthOnlyRoute = location == '/login' || location == '/register';
-      // Accessible sans être connecté, mais aussi depuis l'app (Réglages) une
-      // fois connecté — ne doit jamais rebondir vers /home.
-      final isPublicRoute = isAuthOnlyRoute || location == '/forgot-password';
+      final auth = ref.read(authControllerProvider);
 
-      if (authState.isLoading) {
+      if (auth.isLoading) {
         return location == '/splash' ? null : '/splash';
       }
 
-      final isAuthenticated = authState.valueOrNull != null;
-
-      if (!isAuthenticated) {
-        return isPublicRoute ? null : '/login';
+      if (auth.valueOrNull == null) {
+        return _publicRoutes.contains(location) ? null : '/login';
       }
 
-      if (isAuthOnlyRoute || location == '/splash') {
-        if (postAuthRedirect != null) {
-          Future.microtask(() {
-            ref.read(postAuthRedirectProvider.notifier).state = null;
-          });
-          return postAuthRedirect;
+      // Connecté : on attend de connaître le rôle avant de quitter le
+      // démarrage ou la connexion. Si /users/me échoue (hors-ligne), on
+      // laisse passer : les écrans afficheront leur propre erreur.
+      final user = ref.read(currentUserProvider);
+      if (user.isLoading && !user.hasValue) {
+        return location == '/splash' ? null : '/splash';
+      }
+      final isCreator = user.valueOrNull?.isCreator ?? true;
+
+      if (_guestOnlyRoutes.contains(location) || location == '/splash') {
+        final pending = ref.read(postAuthRedirectProvider);
+        if (pending != null) {
+          Future.microtask(
+            () => ref.read(postAuthRedirectProvider.notifier).state = null,
+          );
+          return pending;
         }
+        return isCreator ? '/home' : '/become-creator';
+      }
+
+      if (!isCreator && !_viewerRoutes.contains(location)) {
+        return '/become-creator';
+      }
+      if (isCreator && location == '/become-creator') {
         return '/home';
       }
-
       return null;
     },
     routes: [
@@ -155,4 +189,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+
+  ref.onDispose(() {
+    router.dispose();
+    refresh.dispose();
+  });
+  return router;
 });

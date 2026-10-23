@@ -6,22 +6,27 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/api_exception.dart';
-import '../../../auth/presentation/providers/auth_controller.dart';
-import '../../../auth/presentation/providers/device_repository_provider.dart';
+import '../../../../core/network/repositories.dart';
 import '../../../auth/presentation/providers/token_storage_provider.dart';
-import '../../data/creator_repository.dart';
+import '../../../publish/data/upload_repository.dart';
+import '../../../videos/data/video_repository.dart';
 import '../../domain/video_analytics.dart';
 import '../../domain/video_playback_access.dart';
 import '../../domain/video_upload_init_response.dart';
 import '../../domain/video_upload_progress.dart';
 import '../../domain/video_with_stats.dart';
 import 'creator_dashboard_provider.dart';
-import 'creator_repository_provider.dart';
 
 final creatorVideosProvider = FutureProvider.autoDispose<List<VideoWithStats>>((
   ref,
 ) async {
-  return ref.watch(creatorRepositoryProvider).listMyVideos();
+  // Une vidéo supprimée reste en base (soft-delete) si elle a été achetée :
+  // elle ne doit plus apparaître dans l'espace du créateur.
+  final videos = await ref.watch(videoRepositoryProvider).listMyVideos();
+  return [
+    for (final video in videos)
+      if (!video.isDeleted) video,
+  ];
 });
 
 /// Résout une vidéo par id depuis la liste déjà chargée par
@@ -43,7 +48,7 @@ final videoByIdProvider = Provider.autoDispose
 
 final videoAnalyticsProvider = FutureProvider.autoDispose
     .family<VideoAnalytics, String>((ref, videoId) {
-      return ref.watch(creatorRepositoryProvider).loadVideoAnalytics(videoId);
+      return ref.watch(videoRepositoryProvider).loadVideoAnalytics(videoId);
     });
 
 /// L'enregistrement de l'appareil au login (voir AuthController) est
@@ -54,36 +59,21 @@ final videoAnalyticsProvider = FutureProvider.autoDispose
 /// (ré)enregistre explicitement l'appareil une fois puis on retente.
 final videoPlaybackAccessProvider = FutureProvider.autoDispose
     .family<VideoPlaybackAccess, String>((ref, videoId) async {
-      final repository = ref.watch(creatorRepositoryProvider);
+      final repository = ref.watch(videoRepositoryProvider);
+      final devices = ref.watch(deviceRepositoryProvider);
+      final tokenStorage = ref.watch(tokenStorageProvider);
       try {
-        return await repository.loadVideoPlaybackAccess(videoId);
+        return await repository.createPlaybackSession(videoId);
       } on ApiException catch (error) {
         final isUnregisteredDevice =
-            error.statusCode == 403 &&
-            error.message.toLowerCase().contains('device');
-        if (!isUnregisteredDevice) {
-          rethrow;
-        }
+            error.statusCode == 403 && error.serverSays('device');
+        if (!isUnregisteredDevice) rethrow;
 
-        final authToken = ref.read(authControllerProvider).valueOrNull;
-        if (authToken == null) {
-          rethrow;
-        }
-
-        final deviceId = await ref
-            .watch(tokenStorageProvider)
-            .readOrCreateDeviceId();
-        // Si l'appareil courant est déjà au maximum (3/3 ailleurs), cet
-        // appel lève sa propre erreur explicite ("Maximum of 3 active
-        // devices reached...") qui remplace l'originale, moins actionnable.
-        await ref
-            .watch(deviceRepositoryProvider)
-            .registerDevice(
-              accessToken: authToken.accessToken,
-              deviceId: deviceId,
-            );
-
-        return await repository.loadVideoPlaybackAccess(videoId);
+        // Le backend désactive au besoin l'appareil le plus ancien pour faire
+        // de la place : l'enregistrement ne bloque plus à 3 appareils.
+        final deviceId = await tokenStorage.readOrCreateDeviceId();
+        await devices.registerDevice(deviceId: deviceId);
+        return repository.createPlaybackSession(videoId);
       }
     });
 
@@ -108,7 +98,7 @@ class VideoMutationController extends StateNotifier<AsyncValue<void>> {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       await _ref
-          .read(creatorRepositoryProvider)
+          .read(videoRepositoryProvider)
           .updateVideo(video.id, isPublished: isPublished);
       _invalidateVideoData(video.id);
     });
@@ -125,7 +115,7 @@ class VideoMutationController extends StateNotifier<AsyncValue<void>> {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       await _ref
-          .read(creatorRepositoryProvider)
+          .read(videoRepositoryProvider)
           .updateVideo(
             videoId,
             title: title,
@@ -141,7 +131,7 @@ class VideoMutationController extends StateNotifier<AsyncValue<void>> {
   Future<void> deleteVideo(String videoId) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
-      await _ref.read(creatorRepositoryProvider).deleteVideo(videoId);
+      await _ref.read(videoRepositoryProvider).deleteVideo(videoId);
       _invalidateVideoData(videoId);
     });
   }
@@ -149,7 +139,7 @@ class VideoMutationController extends StateNotifier<AsyncValue<void>> {
   Future<void> retryTranscode(String videoId) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
-      await _ref.read(creatorRepositoryProvider).retryTranscode(videoId);
+      await _ref.read(videoRepositoryProvider).retryTranscode(videoId);
       _invalidateVideoData(videoId);
     });
   }
@@ -162,11 +152,27 @@ class VideoMutationController extends StateNotifier<AsyncValue<void>> {
 }
 
 const _maxParallelUploads = 3;
+const _maxPartAttempts = 3;
+const _processingPollInterval = Duration(seconds: 3);
+
+/// Au-delà, on arrête de suivre le traitement dans l'écran : il continue côté
+/// serveur et la vidéo apparaîtra dans « Mes vidéos » une fois prête.
+const _processingWatchLimit = Duration(minutes: 30);
 
 class VideoUploadController extends StateNotifier<VideoUploadProgress> {
   VideoUploadController(this._ref) : super(const VideoUploadProgress());
 
   final Ref _ref;
+
+  /// Incrémenté à chaque envoi et à chaque annulation : les tâches d'un envoi
+  /// abandonné le voient et s'arrêtent au lieu d'écraser le nouvel état.
+  int _generation = 0;
+
+  bool _isCurrent(int generation) => mounted && generation == _generation;
+
+  void _update(int generation, VideoUploadProgress next) {
+    if (_isCurrent(generation)) state = next;
+  }
 
   Future<void> uploadFile({
     required PlatformFile file,
@@ -174,11 +180,13 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
     required String description,
     required int price,
   }) async {
+    final generation = ++_generation;
     state = const VideoUploadProgress(phase: UploadPhase.initializing);
-    final repository = _ref.read(creatorRepositoryProvider);
+    final uploads = _ref.read(uploadRepositoryProvider);
+    final videos = _ref.read(videoRepositoryProvider);
 
     try {
-      final init = await repository.initVideoUpload(
+      final init = await uploads.init(
         filename: file.name,
         fileSize: file.size,
         mimeType: _mimeTypeFor(file.extension),
@@ -186,50 +194,72 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
         description: description,
         price: price,
       );
-
       if (init.videoId.isEmpty || init.uploadId.isEmpty || init.parts.isEmpty) {
-        throw const ApiException('Réponse d’initialisation d’envoi invalide.');
+        throw const ApiException(
+          'Réponse d’initialisation d’envoi invalide.',
+          kind: ApiErrorKind.unexpected,
+        );
       }
-
-      state = state.copyWith(
-        phase: UploadPhase.uploadingParts,
-        totalParts: init.totalParts,
-        uploadedParts: 0,
-        videoId: init.videoId,
+      _update(
+        generation,
+        state.copyWith(
+          phase: UploadPhase.uploadingParts,
+          totalParts: init.totalParts,
+          uploadedParts: 0,
+          videoId: init.videoId,
+        ),
       );
 
       final confirmedParts = await _uploadParts(
-        repository: repository,
+        generation: generation,
+        repository: uploads,
         file: file,
         videoId: init.videoId,
         uploadId: init.uploadId,
         chunkSize: init.chunkSize,
         parts: init.parts,
       );
+      if (!_isCurrent(generation)) return;
 
-      state = state.copyWith(phase: UploadPhase.finalizing);
-      await repository.completeUpload(
+      _update(generation, state.copyWith(phase: UploadPhase.finalizing));
+      await uploads.complete(
         init.videoId,
         uploadId: init.uploadId,
         parts: confirmedParts,
       );
+      // À partir d'ici la vidéo existe pour de bon : une annulation ne doit
+      // plus la supprimer.
+      _ref.invalidate(creatorVideosProvider);
 
-      state = state.copyWith(
-        phase: UploadPhase.processing,
-        processingPercent: 0,
+      _update(
+        generation,
+        state.copyWith(phase: UploadPhase.processing, processingPercent: 0),
       );
-      await _pollProcessing(repository, init.videoId);
+      final finished = await _watchProcessing(generation, videos, init.videoId);
+      if (!_isCurrent(generation)) return;
 
-      state = state.copyWith(phase: UploadPhase.ready, processingPercent: 100);
+      _update(
+        generation,
+        state.copyWith(
+          phase: finished
+              ? UploadPhase.ready
+              : UploadPhase.processingInBackground,
+          processingPercent: finished ? 100 : state.processingPercent,
+        ),
+      );
       _ref.invalidate(creatorVideosProvider);
       _ref.invalidate(creatorDashboardProvider);
     } catch (error) {
-      state = state.copyWith(phase: UploadPhase.failed, error: error);
+      _update(
+        generation,
+        state.copyWith(phase: UploadPhase.failed, error: error),
+      );
     }
   }
 
   Future<List<({int partNumber, String etag})>> _uploadParts({
-    required CreatorRepository repository,
+    required int generation,
+    required UploadRepository repository,
     required PlatformFile file,
     required String videoId,
     required String uploadId,
@@ -240,26 +270,28 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
     var nextIndex = 0;
 
     Future<void> worker() async {
-      while (nextIndex < parts.length) {
+      while (nextIndex < parts.length && _isCurrent(generation)) {
         final part = parts[nextIndex++];
         final start = (part.partNumber - 1) * chunkSize;
         final length = math.min(chunkSize, file.size - start);
         final bytes = await _readChunk(file, start, length);
-        final etag = await _withRetry(
+        final etag = await _uploadPartWithRetry(
+          generation: generation,
           repository: repository,
           videoId: videoId,
           uploadId: uploadId,
           part: part,
-          action: (url) => repository.uploadChunk(url, bytes),
+          bytes: bytes,
         );
-        await repository.confirmUploadPart(
+        if (!_isCurrent(generation)) return;
+        await repository.confirmPart(
           videoId,
           partNumber: part.partNumber,
           etag: etag,
           size: bytes.length,
         );
         confirmed[part.partNumber] = etag;
-        state = state.copyWith(uploadedParts: confirmed.length);
+        _update(generation, state.copyWith(uploadedParts: confirmed.length));
       }
     }
 
@@ -271,37 +303,33 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
     );
 
     final ordered = confirmed.keys.toList()..sort();
-    return ordered
-        .map(
-          (partNumber) =>
-              (partNumber: partNumber, etag: confirmed[partNumber]!),
-        )
-        .toList();
+    return [
+      for (final partNumber in ordered)
+        (partNumber: partNumber, etag: confirmed[partNumber]!),
+    ];
   }
 
-  /// Un envoi de 10 Mo sur réseau mobile échoue souvent ponctuellement :
-  /// on retente 3 fois avec attente croissante, en redemandant une URL
-  /// pré-signée fraîche dès la deuxième tentative (l'ancienne a pu expirer).
-  Future<String> _withRetry({
-    required CreatorRepository repository,
+  /// Un envoi de 10 Mo sur réseau mobile échoue souvent ponctuellement : on
+  /// retente avec une attente croissante et une URL pré-signée fraîche (la
+  /// précédente a pu expirer).
+  Future<String> _uploadPartWithRetry({
+    required int generation,
+    required UploadRepository repository,
     required String videoId,
     required String uploadId,
     required UploadPartTarget part,
-    required Future<String> Function(String url) action,
+    required List<int> bytes,
   }) async {
     var url = part.uploadUrl;
-    const maxAttempts = 3;
     for (var attempt = 1; ; attempt++) {
       try {
-        return await action(url);
+        if (url.isEmpty) throw const ApiException('URL d’envoi manquante.');
+        return await repository.uploadPart(url, bytes);
       } catch (error) {
-        final aborted = state.phase != UploadPhase.uploadingParts;
-        if (attempt >= maxAttempts || aborted) {
-          rethrow;
-        }
+        if (attempt >= _maxPartAttempts || !_isCurrent(generation)) rethrow;
         await Future<void>.delayed(Duration(seconds: attempt * 2));
         try {
-          final fresh = await repository.presignUploadParts(
+          final fresh = await repository.presignParts(
             videoId,
             uploadId: uploadId,
             partNumbers: [part.partNumber],
@@ -337,36 +365,60 @@ class VideoUploadController extends StateNotifier<VideoUploadProgress> {
     }
   }
 
-  Future<void> _pollProcessing(
-    CreatorRepository repository,
+  /// Suit le transcodage. Renvoie true si la vidéo est prête, false si l'on a
+  /// cessé de suivre (délai dépassé) alors qu'elle est toujours en cours.
+  /// Les erreurs réseau ponctuelles sont ignorées ; un échec du traitement
+  /// lève une [ApiException].
+  Future<bool> _watchProcessing(
+    int generation,
+    VideoRepository repository,
     String videoId,
   ) async {
-    while (true) {
-      final status = await repository.getProcessingStatus(videoId);
-      state = state.copyWith(processingPercent: status.progress);
-      if (status.isDone) {
-        return;
+    final deadline = DateTime.now().add(_processingWatchLimit);
+    var consecutiveErrors = 0;
+    while (_isCurrent(generation) && DateTime.now().isBefore(deadline)) {
+      try {
+        final status = await repository.getProcessingStatus(videoId);
+        consecutiveErrors = 0;
+        _update(generation, state.copyWith(processingPercent: status.progress));
+        if (status.isDone) return true;
+        if (status.isFailed) {
+          throw ApiException(
+            status.errorMessage == null
+                ? 'Le traitement de la vidéo a échoué.'
+                : 'Le traitement de la vidéo a échoué : ${status.errorMessage}',
+            kind: ApiErrorKind.server,
+          );
+        }
+      } on ApiException catch (error) {
+        if (!error.isNetwork || ++consecutiveErrors >= 5) rethrow;
       }
-      if (status.isFailed) {
-        throw ApiException(
-          status.errorMessage ?? 'Le traitement de la vidéo a échoué.',
-        );
-      }
-      await Future.delayed(const Duration(seconds: 2));
+      await Future<void>.delayed(_processingPollInterval);
     }
+    return false;
   }
 
-  void reset() => state = const VideoUploadProgress();
+  /// Revient au formulaire vierge (après une publication réussie ou un échec).
+  void reset() {
+    _generation++;
+    state = const VideoUploadProgress();
+  }
 
+  /// Annule l'envoi en cours. Avant la finalisation, l'envoi est abandonné
+  /// côté serveur (ce qui supprime la vidéo incomplète). Pendant le
+  /// traitement, la vidéo est déjà enregistrée : on arrête seulement de
+  /// suivre sa progression, sans rien supprimer.
   Future<void> cancel() async {
     final videoId = state.videoId;
-    final wasBusy = state.isBusy;
-    state = const VideoUploadProgress();
-    if (wasBusy && videoId != null && videoId.isNotEmpty) {
+    final abortOnServer =
+        state.phase == UploadPhase.initializing ||
+        state.phase == UploadPhase.uploadingParts;
+    reset();
+    if (abortOnServer && videoId != null && videoId.isNotEmpty) {
       try {
-        await _ref.read(creatorRepositoryProvider).abortUpload(videoId);
+        await _ref.read(uploadRepositoryProvider).abort(videoId);
       } catch (_) {
-        // Best-effort: l'envoi sera nettoyé côté serveur par expiration.
+        // Best-effort : l'envoi expirera côté serveur.
       }
     }
   }

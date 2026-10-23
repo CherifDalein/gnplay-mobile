@@ -6,10 +6,12 @@ class UploadPartTarget {
   final int partNumber;
   final String uploadUrl;
 
+  /// `upload/init` renvoie l'URL sous `url`, `parts/presign` sous
+  /// `upload_url` : on accepte les deux.
   factory UploadPartTarget.fromJson(Map<String, dynamic> json) {
     return UploadPartTarget(
       partNumber: jsonInt(json['part_number']),
-      uploadUrl: jsonString(json['upload_url'], fallback: ''),
+      uploadUrl: jsonString(json['upload_url'] ?? json['url'], fallback: ''),
     );
   }
 }
@@ -114,6 +116,9 @@ class ProcessingStatusResponse {
   bool get isDone => status == 'completed' || status == 'ready';
   bool get isFailed => status == 'failed';
 
+  /// Aucun job de transcodage n'existe (encore) pour cette vidéo.
+  bool get isNotStarted => status == 'not_started';
+
   factory ProcessingStatusResponse.fromJson(Map<String, dynamic> json) {
     return ProcessingStatusResponse(
       videoId: jsonString(json['video_id'], fallback: ''),
@@ -121,6 +126,21 @@ class ProcessingStatusResponse {
       progress: jsonInt(json['progress']),
       attempts: jsonInt(json['attempts']),
       errorMessage: jsonNullableString(json['error_message']),
+    );
+  }
+}
+
+/// Partie déjà confirmée côté serveur (`GET /videos/upload/{id}/parts`).
+class ConfirmedUploadPart {
+  const ConfirmedUploadPart({required this.partNumber, required this.etag});
+
+  final int partNumber;
+  final String etag;
+
+  factory ConfirmedUploadPart.fromJson(Map<String, dynamic> json) {
+    return ConfirmedUploadPart(
+      partNumber: jsonInt(json['part_number']),
+      etag: jsonString(json['etag'], fallback: ''),
     );
   }
 }

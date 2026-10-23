@@ -28,6 +28,18 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   bool _isFree = false;
   bool _picking = false;
 
+  void _resetForm() {
+    setState(() {
+      _pickedFile = null;
+      _step = 1;
+      _isFree = false;
+      _titleController.clear();
+      _descriptionController.clear();
+      _priceController.text = '0';
+      _thumbnailController.clear();
+    });
+  }
+
   @override
   void dispose() {
     _titleController.dispose();
@@ -108,7 +120,12 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
               else
                 _ProcessingStep(
                   progress: uploadState,
-                  onFinish: () => context.go('/videos'),
+                  onFinish: () {
+                    // Formulaire vierge au prochain passage sur l'onglet.
+                    ref.read(videoUploadControllerProvider.notifier).reset();
+                    _resetForm();
+                    context.go('/videos');
+                  },
                 ),
             ],
           ),
@@ -120,7 +137,9 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   int? _stepForPhase(UploadPhase phase) {
     return switch (phase) {
       UploadPhase.uploadingParts || UploadPhase.finalizing => 3,
-      UploadPhase.processing || UploadPhase.ready => 4,
+      UploadPhase.processing ||
+      UploadPhase.processingInBackground ||
+      UploadPhase.ready => 4,
       UploadPhase.idle ||
       UploadPhase.initializing ||
       UploadPhase.failed => null,

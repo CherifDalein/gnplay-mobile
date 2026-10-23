@@ -1,15 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/network/repositories.dart';
 import '../../../auth/domain/device.dart';
-import '../../../auth/presentation/providers/auth_controller.dart';
-import '../../../auth/presentation/providers/device_repository_provider.dart';
 import '../../../auth/presentation/providers/token_storage_provider.dart';
-import '../../../../core/network/api_exception.dart';
 
-final devicesProvider = FutureProvider.autoDispose<List<Device>>((ref) async {
-  final repository = ref.watch(deviceRepositoryProvider);
-  final accessToken = await _requireAccessToken(ref);
-  return repository.listDevices(accessToken);
+final devicesProvider = FutureProvider.autoDispose<List<Device>>((ref) {
+  return ref.watch(deviceRepositoryProvider).listDevices();
 });
 
 final currentDeviceIdProvider = FutureProvider.autoDispose<String>((ref) {
@@ -28,19 +24,10 @@ class DeviceRevokeController extends StateNotifier<AsyncValue<void>> {
 
   Future<void> revoke(String deviceRowId) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      final repository = _ref.read(deviceRepositoryProvider);
-      final accessToken = await _requireAccessToken(_ref);
-      await repository.revokeDevice(accessToken, deviceRowId);
+    final result = await AsyncValue.guard(() async {
+      await _ref.read(deviceRepositoryProvider).revokeDevice(deviceRowId);
       _ref.invalidate(devicesProvider);
     });
+    if (mounted) state = result;
   }
-}
-
-Future<String> _requireAccessToken(Ref ref) async {
-  final token = ref.read(authControllerProvider).valueOrNull;
-  if (token == null) {
-    throw const ApiException('Vous devez vous connecter.');
-  }
-  return token.accessToken;
 }

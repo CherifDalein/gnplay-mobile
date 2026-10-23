@@ -1,13 +1,20 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/network/api_exception.dart';
+import '../../../../core/network/repositories.dart';
 import '../../data/auth_repository.dart';
 import '../../data/device_repository.dart';
 import '../../data/token_storage.dart';
 import '../../domain/token_response.dart';
-import 'auth_repository_provider.dart';
-import 'device_repository_provider.dart';
 import 'token_storage_provider.dart';
 
+/// État de session : `AsyncLoading` uniquement pendant la restauration au
+/// démarrage, puis le jeton courant (ou null si déconnecté).
+///
+/// La connexion elle-même ne repasse PAS l'état en chargement : le routeur
+/// redirige vers l'écran de démarrage pendant un chargement, ce qui détruisait
+/// le formulaire de connexion. Son état (chargement, erreur) vit dans
+/// `loginControllerProvider`.
 final StateNotifierProvider<AuthController, AsyncValue<TokenResponse?>>
 authControllerProvider =
     StateNotifierProvider<AuthController, AsyncValue<TokenResponse?>>((ref) {
@@ -18,6 +25,8 @@ authControllerProvider =
       );
     });
 
+/// Destination à ouvrir juste après une connexion (ex. `/become-creator`
+/// après l'inscription). Lue puis effacée par le routeur.
 final postAuthRedirectProvider = StateProvider<String?>((ref) => null);
 
 class AuthController extends StateNotifier<AsyncValue<TokenResponse?>> {
@@ -30,121 +39,130 @@ class AuthController extends StateNotifier<AsyncValue<TokenResponse?>> {
   final TokenStorage _tokenStorage;
   final DeviceRepository _deviceRepository;
 
-  Future<void> bootstrap() async {
-    try {
-      final storedToken = await _tokenStorage.read();
-      if (storedToken == null) {
-        state = const AsyncData(null);
-        return;
-      }
+  bool get isAuthenticated => state.valueOrNull != null;
 
-      final refreshedToken = await _repository.refreshToken(
+  /// Restaure la session enregistrée. Seul un refus explicite du refresh
+  /// token (4xx) déconnecte : hors-ligne ou serveur indisponible, on garde la
+  /// session locale et les requêtes la renouvelleront plus tard.
+  Future<void> bootstrap() async {
+    final storedToken = await _tokenStorage.read();
+    if (storedToken == null) {
+      _set(null);
+      return;
+    }
+
+    try {
+      final refreshed = await _repository.refreshToken(
         refreshToken: storedToken.refreshToken,
       );
-      await _tokenStorage.save(refreshedToken);
-      state = AsyncData(refreshedToken);
-      _registerCurrentDevice(refreshedToken.accessToken);
-    } catch (_) {
-      await _tokenStorage.clear();
-      state = const AsyncData(null);
-    }
-  }
-
-  Future<TokenResponse?> login({
-    required String phoneNumber,
-    required String password,
-  }) async {
-    state = const AsyncLoading();
-    try {
-      final token = await _repository.login(
-        phoneNumber: phoneNumber,
-        password: password,
-      );
-      await _tokenStorage.save(token);
-      state = AsyncData(token);
-      _registerCurrentDevice(token.accessToken);
-      return token;
-    } catch (error, stackTrace) {
-      state = AsyncError(error, stackTrace);
-      return null;
-    }
-  }
-
-  Future<TokenResponse?> loginAfterRegistration({
-    required String phoneNumber,
-    required String password,
-  }) async {
-    try {
-      final token = await _repository.login(
-        phoneNumber: phoneNumber,
-        password: password,
-      );
-      await _tokenStorage.save(token);
-      state = AsyncData(token);
-      _registerCurrentDevice(token.accessToken);
-      return token;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Enregistre cet appareil auprès du backend en arrière-plan : requis pour
-  /// que la lecture vidéo (sessions HLS) et l'écran Appareils fonctionnent.
-  /// Best-effort — une limite de 3 appareils atteinte ne doit pas bloquer la
-  /// connexion, l'utilisateur la verra sur l'écran Appareils.
-  void _registerCurrentDevice(String accessToken) {
-    Future(() async {
-      try {
-        final deviceId = await _tokenStorage.readOrCreateDeviceId();
-        await _deviceRepository.registerDevice(
-          accessToken: accessToken,
-          deviceId: deviceId,
-        );
-      } catch (_) {
-        // Ignoré : la limite de 3 appareils (ou une panne réseau) ne doit
-        // pas empêcher la connexion.
+      await _tokenStorage.save(refreshed);
+      _set(refreshed);
+      _registerCurrentDevice();
+    } on ApiException catch (error) {
+      final rejected =
+          error.statusCode != null &&
+          error.statusCode! >= 400 &&
+          error.statusCode! < 500;
+      if (rejected) {
+        await _tokenStorage.clear();
+        _set(null);
+      } else {
+        _set(storedToken);
       }
-    });
+    } catch (_) {
+      _set(storedToken);
+    }
+  }
+
+  /// Connecte l'utilisateur ; lève une [ApiException] en cas d'échec.
+  Future<TokenResponse> login({
+    required String phoneNumber,
+    required String password,
+  }) async {
+    final token = await _repository.login(
+      phoneNumber: phoneNumber,
+      password: password,
+    );
+    await _tokenStorage.save(token);
+    _set(token);
+    _registerCurrentDevice();
+    return token;
   }
 
   /// Appelé par le client HTTP quand le refresh token est refusé : le stockage
   /// est déjà vidé, il ne reste qu'à repasser à l'état déconnecté (le routeur
   /// renvoie alors vers /login).
-  void handleSessionExpired() {
-    if (!mounted) return;
-    state = const AsyncData(null);
-  }
+  void handleSessionExpired() => _set(null);
 
-  // Le refresh token tourne à chaque renouvellement : le stockage est la seule
-  // source à jour, l'état en mémoire peut être périmé.
-  Future<void> logout() async {
-    final currentToken = await _tokenStorage.read() ?? state.valueOrNull;
-    state = const AsyncLoading();
+  /// Déconnecte cet appareil. La session locale est effacée même si l'appel
+  /// au serveur échoue (hors-ligne) : l'utilisateur doit pouvoir se
+  /// déconnecter en toutes circonstances.
+  Future<void> logout() => _signOut(allDevices: false);
 
+  /// Révoque toutes les sessions du compte.
+  Future<void> logoutAllDevices() => _signOut(allDevices: true);
+
+  Future<void> _signOut({required bool allDevices}) async {
+    // Le refresh token tourne à chaque renouvellement : le stockage est la
+    // seule source à jour.
+    final current = await _tokenStorage.read();
     try {
-      if (currentToken != null) {
+      if (current != null) {
         await _repository.logout(
-          accessToken: currentToken.accessToken,
-          refreshToken: currentToken.refreshToken,
+          refreshToken: allDevices ? null : current.refreshToken,
         );
       }
+    } catch (_) {
+      // Ignoré : la déconnexion locale prime.
     } finally {
       await _tokenStorage.clear();
-      state = const AsyncData(null);
+      _set(null);
     }
   }
 
-  Future<void> logoutAllDevices() async {
-    final currentToken = await _tokenStorage.read() ?? state.valueOrNull;
-    state = const AsyncLoading();
-
-    try {
-      if (currentToken != null) {
-        await _repository.logout(accessToken: currentToken.accessToken);
+  /// Enregistre cet appareil en arrière-plan : requis pour la lecture vidéo.
+  /// Best-effort, la lecture le refait au besoin.
+  void _registerCurrentDevice() {
+    Future(() async {
+      try {
+        final deviceId = await _tokenStorage.readOrCreateDeviceId();
+        await _deviceRepository.registerDevice(deviceId: deviceId);
+      } catch (_) {
+        // Ignoré : ne doit pas empêcher la connexion.
       }
-    } finally {
-      await _tokenStorage.clear();
-      state = const AsyncData(null);
+    });
+  }
+
+  void _set(TokenResponse? token) {
+    if (mounted) state = AsyncData(token);
+  }
+}
+
+/// Chargement / erreur du formulaire de connexion.
+final loginControllerProvider =
+    StateNotifierProvider.autoDispose<LoginController, AsyncValue<void>>(
+      (ref) => LoginController(ref),
+    );
+
+class LoginController extends StateNotifier<AsyncValue<void>> {
+  LoginController(this._ref) : super(const AsyncData(null));
+
+  final Ref _ref;
+
+  Future<bool> login({
+    required String phoneNumber,
+    required String password,
+  }) async {
+    state = const AsyncLoading();
+    try {
+      await _ref
+          .read(authControllerProvider.notifier)
+          .login(phoneNumber: phoneNumber, password: password);
+      if (mounted) state = const AsyncData(null);
+      return true;
+    } catch (error, stackTrace) {
+      if (mounted) state = AsyncError(error, stackTrace);
+      return false;
     }
   }
 }

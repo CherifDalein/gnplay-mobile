@@ -433,14 +433,16 @@ class _PreviewHeroState extends State<_PreviewHero> {
   VideoPlayerController? _controller;
   bool _isInitializing = false;
   bool _isMuted = true;
+  // Voir full_video_player_screen.dart : on mémorise localement la réussite
+  // de l'initialisation car media_kit (Linux) peut ensuite remettre
+  // `controller.value` à zéro sur une erreur non fatale alors que la vidéo joue.
+  bool _started = false;
+  double _aspectRatio = 16 / 9;
   Object? _error;
 
   String? get _sourceUrl => widget.video.previewUrl;
 
-  bool get _isReady {
-    final controller = _controller;
-    return controller != null && controller.value.isInitialized;
-  }
+  bool get _isReady => _controller != null && _started;
 
   @override
   void initState() {
@@ -472,6 +474,7 @@ class _PreviewHeroState extends State<_PreviewHero> {
 
     setState(() {
       _isInitializing = true;
+      _started = false;
       _error = null;
     });
 
@@ -481,6 +484,9 @@ class _PreviewHeroState extends State<_PreviewHero> {
 
     try {
       await controller.initialize();
+      final ratio = controller.value.aspectRatio;
+      _aspectRatio = ratio > 0 ? ratio : 16 / 9;
+      _started = true;
       await controller.setLooping(true);
       await controller.setVolume(_isMuted ? 0 : 1);
       await controller.play();
@@ -505,7 +511,7 @@ class _PreviewHeroState extends State<_PreviewHero> {
 
   Future<void> _togglePlayback() async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) {
+    if (controller == null || !_started) {
       return;
     }
 
@@ -551,10 +557,8 @@ class _PreviewHeroState extends State<_PreviewHero> {
           if (_isReady)
             Center(
               child: AspectRatio(
-                aspectRatio: controller!.value.aspectRatio == 0
-                    ? 16 / 9
-                    : controller.value.aspectRatio,
-                child: VideoPlayer(controller),
+                aspectRatio: _aspectRatio,
+                child: VideoPlayer(controller!),
               ),
             )
           else
@@ -951,7 +955,7 @@ class _PublishRow extends StatelessWidget {
           GnContentSwitch(
             value: video.isPublished,
             isLoading: isLoading,
-            onChanged: video.isProcessing || video.isFailed ? null : onToggle,
+            onChanged: video.canTogglePublish ? onToggle : null,
           ),
         ],
       ),

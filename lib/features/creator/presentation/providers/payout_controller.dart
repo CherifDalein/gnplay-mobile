@@ -1,8 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/network/repositories.dart';
 import '../../domain/payout_request.dart';
 import 'creator_dashboard_provider.dart';
-import 'creator_repository_provider.dart';
 import 'creator_wallet_provider.dart';
 import 'payout_providers.dart';
 
@@ -26,8 +26,8 @@ class PayoutController extends StateNotifier<AsyncValue<PayoutRequestRecord?>> {
     state = const AsyncLoading();
     try {
       final record = await _ref
-          .read(creatorRepositoryProvider)
-          .requestPayout(
+          .read(payoutRepositoryProvider)
+          .request(
             amount: amount,
             operator: operator,
             destinationPhone: destinationPhone,
