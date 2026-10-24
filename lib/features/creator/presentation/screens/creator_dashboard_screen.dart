@@ -1,607 +1,292 @@
-import 'dart:math' as math;
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/locale/currency_provider.dart';
 import '../../../../core/network/api_exception.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../../../shared/utils/gn_formatters.dart';
 import '../../../../shared/widgets/design_system/gn_design_system.dart';
-import '../../domain/creator_dashboard.dart';
-import '../../domain/top_video.dart';
 import '../../../profile/presentation/providers/notification_provider.dart';
+import '../../domain/creator_dashboard.dart';
+import '../providers/creator_content_provider.dart';
 import '../providers/creator_dashboard_provider.dart';
+import '../widgets/creator_avatar.dart';
 import '../widgets/creator_content_widgets.dart';
+import '../widgets/dashboard_balance_card.dart';
+import '../widgets/dashboard_stats_grid.dart';
+import '../widgets/dashboard_top_videos.dart';
+import '../widgets/notification_bell.dart';
 
-class CreatorDashboardScreen extends ConsumerWidget {
-  const CreatorDashboardScreen({super.key});
+/// Onglet Accueil du créateur.
+///
+/// Le contenu déjà chargé reste à l'écran pendant un rafraîchissement (tirer
+/// pour actualiser, retour sur l'onglet) : seul un fin trait de progression
+/// l'indique. Le plein écran de chargement n'apparaît qu'au tout premier
+/// chargement.
+class CreatorDashboardScreen extends ConsumerStatefulWidget {
+  const CreatorDashboardScreen({
+    super.key,
+    this.minRefreshInterval = const Duration(seconds: 20),
+  });
+
+  /// Délai minimal entre deux actualisations automatiques au retour sur
+  /// l'onglet, pour ne pas relancer quatre requêtes à chaque va-et-vient.
+  final Duration minRefreshInterval;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final dashboardState = ref.watch(creatorDashboardProvider);
+  ConsumerState<CreatorDashboardScreen> createState() =>
+      _CreatorDashboardScreenState();
+}
+
+class _CreatorDashboardScreenState
+    extends ConsumerState<CreatorDashboardScreen> {
+  ValueListenable<bool>? _tabActive;
+  bool _wasActive = true;
+  bool _pulling = false;
+  DateTime _lastRefresh = DateTime.now();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // L'onglet reste monté quand on en change ou qu'on ouvre un écran par-
+    // dessus : seul `TickerMode` signale qu'il redevient visible.
+    final notifier = TickerMode.getNotifier(context);
+    if (!identical(notifier, _tabActive)) {
+      _tabActive?.removeListener(_onTabVisibilityChanged);
+      _tabActive = notifier..addListener(_onTabVisibilityChanged);
+      _wasActive = notifier.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _tabActive?.removeListener(_onTabVisibilityChanged);
+    super.dispose();
+  }
+
+  void _onTabVisibilityChanged() {
+    final active = _tabActive?.value ?? true;
+    final becameVisible = active && !_wasActive;
+    _wasActive = active;
+    if (!becameVisible) return;
+    // Le notifier change pendant la construction de l'arbre : on invalide les
+    // providers après le cadre.
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final recent =
+          DateTime.now().difference(_lastRefresh) < widget.minRefreshInterval;
+      if (recent || ref.read(creatorDashboardProvider).isLoading) return;
+      _reload();
+    });
+  }
+
+  /// Recharge le tableau de bord ET le compteur de notifications. La liste des
+  /// vidéos est invalidée aussi : le tableau de bord la lit en cache, sans quoi
+  /// les revenus des vidéos du top ne bougeraient pas.
+  Future<void> _reload() {
+    _lastRefresh = DateTime.now();
+    ref.invalidate(creatorVideosProvider);
+    return Future.wait([
+      _ignoreErrors(ref.refresh(creatorDashboardProvider.future)),
+      _ignoreErrors(ref.refresh(unreadNotificationCountProvider.future)),
+    ]);
+  }
+
+  // L'erreur reste dans l'état du provider, où l'écran l'affiche.
+  Future<void> _ignoreErrors(Future<Object?> future) =>
+      future.then((_) {}, onError: (Object _) {});
+
+  Future<void> _pullToRefresh() async {
+    setState(() => _pulling = true);
+    try {
+      await _reload();
+    } finally {
+      if (mounted) setState(() => _pulling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = ref.watch(creatorDashboardProvider);
+    final dashboard = state.valueOrNull;
+    // Indicateur discret ; le RefreshIndicator a déjà le sien au tirage.
+    final refreshing = dashboard != null && state.isLoading && !_pulling;
 
     return Scaffold(
       backgroundColor: AppColors.bgApp,
       body: SafeArea(
         bottom: false,
         child: GnAppBackground(
-          child: RefreshIndicator(
-            color: AppColors.accent500,
-            backgroundColor: AppColors.surface1,
-            onRefresh: () => ref.refresh(creatorDashboardProvider.future),
-            child: CustomScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 116),
-                  sliver: dashboardState.when(
-                    data: (dashboard) => SliverList(
-                      delegate: SliverChildListDelegate.fixed([
-                        _CreatorHeader(dashboard: dashboard),
-                        const SizedBox(height: 20),
-                        _BalanceCard(dashboard: dashboard),
-                        const SizedBox(height: 14),
-                        _StatsGrid(dashboard: dashboard),
-                        const SizedBox(height: 24),
-                        _TopVideosHeader(onTap: () => context.go('/videos')),
-                        const SizedBox(height: 12),
-                        if (dashboard.topVideos.isEmpty)
-                          const _NoVideosYet()
-                        else
-                          ...dashboard.topVideos
-                              .take(5)
-                              .map(
-                                (video) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: _TopVideoTile(video: video),
-                                ),
-                              ),
-                      ]),
-                    ),
-                    loading: () =>
-                        const SliverToBoxAdapter(child: GnLoadingState()),
-                    error: (error, _) => SliverToBoxAdapter(
-                      // 403 = compte « viewer » : l'espace créateur lui est
-                      // fermé tant qu'il n'a pas activé son profil.
-                      child: error is ApiException && error.statusCode == 403
-                          ? const _NotCreatorYet()
-                          : GnAsyncError(
-                              message: friendlyErrorMessage(error),
-                              onRetry: () =>
-                                  ref.invalidate(creatorDashboardProvider),
-                            ),
-                    ),
+          child: Column(
+            children: [
+              SizedBox(
+                height: 2,
+                child: refreshing
+                    ? const LinearProgressIndicator(
+                        color: AppColors.accent500,
+                        backgroundColor: Colors.transparent,
+                        semanticsLabel: 'Actualisation en cours',
+                      )
+                    : null,
+              ),
+              Expanded(
+                child: RefreshIndicator(
+                  color: AppColors.accent500,
+                  backgroundColor: AppColors.surface1,
+                  onRefresh: _pullToRefresh,
+                  child: CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    slivers: _slivers(state, dashboard),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
+
+  List<Widget> _slivers(
+    AsyncValue<CreatorDashboard> state,
+    CreatorDashboard? dashboard,
+  ) {
+    if (dashboard != null) {
+      return [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 32),
+          sliver: SliverToBoxAdapter(
+            child: _DashboardContent(
+              dashboard: dashboard,
+              // Échec d'un rafraîchissement : on garde les données affichées.
+              refreshError: state.hasError && !state.isLoading
+                  ? state.error
+                  : null,
+              onRetry: _reload,
+            ),
+          ),
+        ),
+      ];
+    }
+
+    // Une nouvelle tentative après une erreur repasse par le chargement.
+    if (state.isLoading || !state.hasError) {
+      return const [
+        SliverFillRemaining(child: GnLoadingView(message: 'Chargement…')),
+      ];
+    }
+
+    final error = state.error!;
+    // 403 : compte non créateur. Le routeur l'en empêche normalement ; on
+    // garde un état propre plutôt qu'une erreur réseau trompeuse.
+    final notCreator =
+        error is ApiException && error.kind == ApiErrorKind.forbidden;
+    return [
+      SliverFillRemaining(
+        child: notCreator
+            ? GnEmptyView(
+                title: 'Espace réservé aux créateurs',
+                message:
+                    'Activez votre profil créateur pour publier des vidéos '
+                    'et suivre vos gains.',
+                actionLabel: 'Devenir créateur',
+                onAction: () => context.go('/become-creator'),
+              )
+            : GnErrorView(
+                message: friendlyErrorMessage(error),
+                onRetry: _reload,
+              ),
+      ),
+    ];
+  }
 }
 
-class _CreatorHeader extends ConsumerWidget {
-  const _CreatorHeader({required this.dashboard});
+class _DashboardContent extends ConsumerWidget {
+  const _DashboardContent({
+    required this.dashboard,
+    required this.refreshError,
+    required this.onRetry,
+  });
 
   final CreatorDashboard dashboard;
+  final Object? refreshError;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final user = dashboard.user;
+    final currency = ref.watch(userCurrencyProvider);
     final unread = ref.watch(unreadNotificationCountProvider).valueOrNull ?? 0;
+    final user = dashboard.user;
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          width: 42,
-          height: 42,
-          alignment: Alignment.center,
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [AppColors.brand800, AppColors.brand500],
-            ),
+        if (refreshError != null) ...[
+          GnBanner(
+            tone: GnBannerTone.danger,
+            title: 'Actualisation impossible',
+            message: friendlyErrorMessage(refreshError!),
+            actionLabel: 'Réessayer',
+            onAction: onRetry,
           ),
-          child: Text(
-            user.initials,
-            style: AppTextStyles.heading.copyWith(
-              color: AppColors.text1,
-              fontSize: 15,
-            ),
-          ),
-        ),
-        const SizedBox(width: 11),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                user.fullName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.body.copyWith(
-                  color: AppColors.text1,
-                  fontSize: 14.5,
-                  fontWeight: FontWeight.w600,
-                  height: 1.2,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const GnStatusPill(label: 'CRÉATEUR', tone: GnStatusTone.brand),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        Semantics(
-          button: true,
-          label: unread > 0
-              ? 'Notifications, $unread non lues'
-              : 'Notifications',
-          child: GestureDetector(
-            onTap: () => context.push('/notifications'),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const GnCard(
-                  padding: EdgeInsets.zero,
-                  radius: AppRadii.pill,
-                  child: SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: Center(
-                      child: GnLineIcon(
-                        GnLineIconData.bell,
-                        color: AppColors.text2,
-                        size: 17,
-                      ),
-                    ),
-                  ),
-                ),
-                if (unread > 0)
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    child: Container(
-                      constraints: const BoxConstraints(
-                        minWidth: 16,
-                        minHeight: 16,
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: AppColors.accent500,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppColors.bgApp, width: 2),
-                      ),
-                      child: Text(
-                        unread > 9 ? '9+' : '$unread',
-                        style: AppTextStyles.micro.copyWith(
-                          color: AppColors.bgApp,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w800,
-                          height: 1.1,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.dashboard});
-
-  final CreatorDashboard dashboard;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: AppGradients.brand,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Stack(
-        children: [
-          const Positioned(
-            right: -50,
-            top: -50,
-            child: SizedBox.square(
-              dimension: 150,
-              child: CustomPaint(painter: _DashedCirclePainter()),
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'SOLDE RETIRABLE',
-                style: AppTextStyles.caption.copyWith(
-                  color: AppColors.text1.withValues(alpha: 0.7),
-                  letterSpacing: 0,
-                ),
-              ),
-              const SizedBox(height: 6),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text(
-                      formatMoney(
-                        dashboard.withdrawableBalance,
-                        withCurrency: false,
-                      ),
-                      style: AppTextStyles.displayLg.copyWith(
-                        color: AppColors.accent300,
-                        fontSize: 34,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'GNF',
-                      style: AppTextStyles.label.copyWith(
-                        color: AppColors.accent300,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              RichText(
-                text: TextSpan(
-                  style: AppTextStyles.caption.copyWith(
-                    color: AppColors.text1.withValues(alpha: 0.6),
-                  ),
-                  children: [
-                    TextSpan(
-                      text:
-                          'Solde du portefeuille : ${formatMoney(dashboard.walletBalance)} · ',
-                    ),
-                    TextSpan(
-                      text:
-                          '+${formatMoney(dashboard.analytics.revenueThisMonth, withCurrency: false)} ce mois-ci',
-                      style: const TextStyle(
-                        color: AppColors.success,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 40,
-                child: OutlinedButton(
-                  onPressed: () => context.go('/earnings'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.text1,
-                    backgroundColor: AppColors.text1.withValues(alpha: 0.14),
-                    side: BorderSide(
-                      color: AppColors.text1.withValues(alpha: 0.25),
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 18),
-                  ),
-                  child: Text(
-                    'Retirer mes gains',
-                    style: AppTextStyles.label.copyWith(
+          const SizedBox(height: 14),
+        ],
+        Row(
+          children: [
+            CreatorAvatar(initials: user.initials, imageUrl: user.avatar),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    user.fullName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.body.copyWith(
                       color: AppColors.text1,
+                      fontSize: 14.5,
                       fontWeight: FontWeight.w600,
+                      height: 1.2,
                     ),
                   ),
-                ),
+                  const SizedBox(height: 4),
+                  const GnStatusPill(
+                    label: 'CRÉATEUR',
+                    tone: GnStatusTone.brand,
+                  ),
+                ],
               ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatsGrid extends StatelessWidget {
-  const _StatsGrid({required this.dashboard});
-
-  final CreatorDashboard dashboard;
-
-  @override
-  Widget build(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 11,
-      crossAxisSpacing: 11,
-      childAspectRatio: 1.55,
-      children: [
-        GnStatTile(
-          icon: const GnLineIcon(
-            GnLineIconData.video,
-            color: AppColors.brand500,
-            size: 15,
-          ),
-          value: '${dashboard.analytics.totalVideos}',
-          label: 'Vidéos publiées',
+            ),
+            const SizedBox(width: 12),
+            NotificationBell(
+              unreadCount: unread,
+              onPressed: () => context.push('/notifications'),
+            ),
+          ],
         ),
-        GnStatTile(
-          icon: const GnLineIcon(
-            GnLineIconData.eye,
-            color: AppColors.brand500,
-            size: 15,
-          ),
-          value: formatGrouped(dashboard.analytics.totalViews),
-          label: 'Vues totales',
+        const SizedBox(height: 20),
+        DashboardBalanceCard(
+          withdrawableBalance: dashboard.withdrawableBalance,
+          walletBalance: dashboard.walletBalance,
+          revenueThisMonth: dashboard.analytics.revenueThisMonth,
+          currency: currency,
+          onWithdraw: () => context.push('/payout'),
         ),
-        GnStatTile(
-          icon: const GnLineIcon(
-            GnLineIconData.group,
-            color: AppColors.brand500,
-            size: 15,
-          ),
-          value: formatGrouped(dashboard.analytics.totalFollowers),
-          label: 'Abonnés',
-        ),
-        GnStatTile(
-          icon: const GnLineIcon(
-            GnLineIconData.wallet,
-            color: AppColors.brand500,
-            size: 15,
-          ),
-          value: formatCompact(dashboard.analytics.revenueThisMonth),
-          label: 'Revenu du mois',
+        const SizedBox(height: 14),
+        DashboardStatsGrid(analytics: dashboard.analytics),
+        const SizedBox(height: 24),
+        DashboardTopVideos(
+          videos: dashboard.topVideos,
+          currency: currency,
+          onSeeAll: () => context.go('/videos'),
+          // `push` : on garde l'onglet Accueil dessous et le retour y ramène.
+          onOpenVideo: (video) => context.push('/videos/${video.videoId}'),
+          onPublish: () => context.go('/publish'),
         ),
       ],
     );
   }
-}
-
-class _NotCreatorYet extends StatelessWidget {
-  const _NotCreatorYet();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 60),
-      child: Column(
-        children: [
-          Text(
-            'Votre compte n’est pas encore créateur',
-            textAlign: TextAlign.center,
-            style: AppTextStyles.heading.copyWith(color: AppColors.text1),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Activez votre profil créateur pour publier des vidéos et suivre vos gains.',
-            textAlign: TextAlign.center,
-            style: AppTextStyles.caption.copyWith(color: AppColors.text3),
-          ),
-          const SizedBox(height: 20),
-          GnButton(
-            label: 'Devenir créateur',
-            onPressed: () => context.go('/become-creator'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _NoVideosYet extends StatelessWidget {
-  const _NoVideosYet();
-
-  @override
-  Widget build(BuildContext context) {
-    return GnCard(
-      radius: 14,
-      child: Text(
-        'Publiez votre première vidéo pour voir apparaître ici vos meilleures performances.',
-        style: AppTextStyles.caption.copyWith(color: AppColors.text3),
-      ),
-    );
-  }
-}
-
-class _TopVideosHeader extends StatelessWidget {
-  const _TopVideosHeader({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            'Vos vidéos les plus vues',
-            style: AppTextStyles.heading.copyWith(color: AppColors.text1),
-          ),
-        ),
-        TextButton(
-          onPressed: onTap,
-          style: TextButton.styleFrom(
-            foregroundColor: AppColors.accent500,
-            textStyle: AppTextStyles.caption.copyWith(fontSize: 12),
-            padding: EdgeInsets.zero,
-          ),
-          child: const Text('Tout voir'),
-        ),
-      ],
-    );
-  }
-}
-
-class _TopVideoTile extends StatelessWidget {
-  const _TopVideoTile({required this.video});
-
-  final TopVideo video;
-
-  @override
-  Widget build(BuildContext context) {
-    return GnCard(
-      padding: EdgeInsets.zero,
-      radius: 14,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => context.go('/videos/${video.videoId}'),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  child: SizedBox(
-                    width: 74,
-                    height: 48,
-                    child:
-                        video.thumbnailUrl == null ||
-                            video.thumbnailUrl!.isEmpty
-                        ? const _ThumbnailPlaceholder()
-                        : Image.network(video.thumbnailUrl!, fit: BoxFit.cover),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        video.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppTextStyles.label.copyWith(
-                          color: AppColors.text1,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      RichText(
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        text: TextSpan(
-                          style: AppTextStyles.caption.copyWith(
-                            color: AppColors.text3,
-                            fontSize: 11,
-                          ),
-                          children: [
-                            TextSpan(
-                              text: '${formatGrouped(video.viewCount)} vues · ',
-                            ),
-                            TextSpan(
-                              text: formatMoney(video.revenue),
-                              style: const TextStyle(
-                                color: AppColors.accent300,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const GnLineIcon(
-                  GnLineIconData.chevronRight,
-                  color: AppColors.text4,
-                  size: 16,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ThumbnailPlaceholder extends StatelessWidget {
-  const _ThumbnailPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return const DecoratedBox(
-      decoration: BoxDecoration(color: AppColors.brand950),
-      child: CustomPaint(
-        painter: _StripePainter(),
-        child: Center(
-          child: Text(
-            'miniature',
-            style: TextStyle(
-              color: AppColors.text3,
-              fontSize: 7.5,
-              fontFamily: AppFonts.mono,
-              letterSpacing: 0,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DashedCirclePainter extends CustomPainter {
-  const _DashedCirclePainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = AppColors.text1.withValues(alpha: 0.18)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    final rect = Offset.zero & size;
-    const dashCount = 42;
-    const gap = 0.08;
-    for (var i = 0; i < dashCount; i++) {
-      final start = i * 2 * math.pi / dashCount;
-      canvas.drawArc(
-        rect,
-        start,
-        (2 * math.pi / dashCount) - gap,
-        false,
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _StripePainter extends CustomPainter {
-  const _StripePainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final dark = Paint()..color = const Color(0xFF1A0C12);
-    for (var x = -size.height; x < size.width; x += 12) {
-      final path = Path()
-        ..moveTo(x, size.height)
-        ..lineTo(x + 6, size.height)
-        ..lineTo(x + size.height + 6, 0)
-        ..lineTo(x + size.height, 0)
-        ..close();
-      canvas.drawPath(path, dark);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

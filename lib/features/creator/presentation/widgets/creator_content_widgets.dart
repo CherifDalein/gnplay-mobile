@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/network/api_exception.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/design_system/gn_design_system.dart';
 
@@ -348,12 +349,13 @@ class GnAsyncError extends StatelessWidget {
   }
 }
 
+/// Message d'erreur affichable : celui d'une [ApiException] (déjà en français),
+/// sinon un texte générique — jamais le `toString()` brut d'une exception.
 String friendlyErrorMessage(Object error) {
-  final text = error.toString().trim();
-  if (text.isEmpty) {
-    return 'Une erreur inattendue est survenue.';
+  if (error is ApiException && error.message.trim().isNotEmpty) {
+    return error.message;
   }
-  return text;
+  return 'Une erreur inattendue est survenue.';
 }
 
 class _StripedPlaceholder extends StatelessWidget {

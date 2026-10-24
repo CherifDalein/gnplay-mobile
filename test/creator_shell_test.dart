@@ -136,7 +136,23 @@ http.Client _fakeClient({required bool failing}) {
           'total_refunded': 0,
         });
       case '/api/v1/videos/mine':
-        return ok(<Object>[]);
+        // Comme le vrai backend : la vidéo du top figure aussi dans la liste
+        // (une vidéo absente de la liste est une vidéo supprimée).
+        return ok([
+          {
+            'id': 'v1',
+            'title': 'Marché Madina',
+            'view_count': 90,
+            'likes_count': 5,
+            'revenue': 4000,
+            'price': 1000,
+            'duration': 120,
+            'status': 'ready',
+            'is_published': true,
+            'created_at': '2026-02-01T00:00:00Z',
+            'updated_at': '2026-02-01T00:00:00Z',
+          },
+        ]);
       case '/api/v1/wallets/transactions':
         return ok([
           {

@@ -2,22 +2,58 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../../core/network/api_exception.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/design_system/gn_design_system.dart';
+import '../../../auth/presentation/providers/auth_controller.dart';
 import '../providers/become_creator_controller.dart';
+import '../widgets/creator_content_widgets.dart' show friendlyErrorMessage;
 
 class BecomeCreatorScreen extends ConsumerWidget {
   const BecomeCreatorScreen({super.key});
+
+  Future<void> _confirmAndActivate(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showGnConfirmSheet(
+      context,
+      title: 'Devenir créateur ?',
+      message:
+          'Cette action est définitive. Votre compte passera en mode créateur '
+          ': vous pourrez publier des vidéos et retirer vos gains.',
+      confirmLabel: 'Devenir créateur',
+    );
+    if (!confirmed || !context.mounted) return;
+
+    final user = await ref
+        .read(becomeCreatorControllerProvider.notifier)
+        .becomeCreator();
+    // Pas de navigation ici : le compte rechargé fait basculer le routeur
+    // vers l'accueil. Le toast vit dans l'overlay racine et survit au
+    // changement d'écran.
+    if (user != null && context.mounted) {
+      showGnToast(
+        context,
+        'Vous êtes créateur. Publiez votre première vidéo !',
+        tone: GnToastTone.success,
+      );
+    }
+  }
+
+  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showGnConfirmSheet(
+      context,
+      title: 'Se déconnecter ?',
+      message: 'Vous pourrez vous reconnecter à tout moment.',
+      confirmLabel: 'Se déconnecter',
+    );
+    if (!confirmed) return;
+    await ref.read(authControllerProvider.notifier).logout();
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(becomeCreatorControllerProvider);
     final isLoading = state.isLoading;
     final errorMessage = state.whenOrNull(
-      error: (error, _) => error is ApiException
-          ? error.message
-          : 'Une erreur inattendue est survenue.',
+      error: (error, _) => friendlyErrorMessage(error),
     );
 
     return Scaffold(
@@ -28,7 +64,7 @@ class BecomeCreatorScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const _HeroPanel(),
+              _HeroPanel(onSettings: () => context.push('/settings')),
               Expanded(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.fromLTRB(26, 24, 26, 32),
@@ -52,22 +88,23 @@ class BecomeCreatorScreen extends ConsumerWidget {
                             'Versement direct sur votre compte mobile money.',
                       ),
                       const SizedBox(height: 24),
+                      if (errorMessage != null) ...[
+                        GnBanner(
+                          tone: GnBannerTone.danger,
+                          title: 'Activation impossible',
+                          message: errorMessage,
+                        ),
+                        const SizedBox(height: 14),
+                      ],
                       GnButton(
-                        label: 'Devenir créateur',
+                        label: errorMessage == null
+                            ? 'Devenir créateur'
+                            : 'Réessayer',
                         size: GnButtonSize.lg,
                         isLoading: isLoading,
                         onPressed: isLoading
                             ? null
-                            : () async {
-                                final user = await ref
-                                    .read(
-                                      becomeCreatorControllerProvider.notifier,
-                                    )
-                                    .becomeCreator();
-                                if (context.mounted && user != null) {
-                                  context.go('/publish');
-                                }
-                              },
+                            : () => _confirmAndActivate(context, ref),
                       ),
                       const SizedBox(height: 12),
                       Text(
@@ -78,16 +115,23 @@ class BecomeCreatorScreen extends ConsumerWidget {
                           fontSize: 11,
                         ),
                       ),
-                      if (errorMessage != null) ...[
-                        const SizedBox(height: 14),
-                        Text(
-                          errorMessage,
-                          textAlign: TextAlign.center,
-                          style: AppTextStyles.caption.copyWith(
-                            color: AppColors.danger,
+                      const SizedBox(height: 8),
+                      // Un spectateur n'a pas d'autre écran : il doit pouvoir
+                      // quitter son compte d'ici.
+                      Center(
+                        child: TextButton(
+                          onPressed: isLoading
+                              ? null
+                              : () => _confirmLogout(context, ref),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.text2,
+                            minimumSize: const Size(44, 44),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            textStyle: AppTextStyles.label,
                           ),
+                          child: const Text('Se déconnecter'),
                         ),
-                      ],
+                      ),
                     ],
                   ),
                 ),
@@ -101,7 +145,9 @@ class BecomeCreatorScreen extends ConsumerWidget {
 }
 
 class _HeroPanel extends StatelessWidget {
-  const _HeroPanel();
+  const _HeroPanel({required this.onSettings});
+
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -124,6 +170,30 @@ class _HeroPanel extends StatelessWidget {
                     SizedBox(width: 5),
                     _StepBar(opacity: 0.3),
                   ],
+                ),
+              ),
+              Positioned(
+                right: 10,
+                top: 4,
+                child: Semantics(
+                  button: true,
+                  label: 'Réglages',
+                  excludeSemantics: true,
+                  onTap: onSettings,
+                  child: InkResponse(
+                    onTap: onSettings,
+                    radius: 22,
+                    child: const SizedBox.square(
+                      dimension: 44,
+                      child: Center(
+                        child: GnLineIcon(
+                          GnLineIconData.settings,
+                          color: AppColors.text1,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
               Positioned(

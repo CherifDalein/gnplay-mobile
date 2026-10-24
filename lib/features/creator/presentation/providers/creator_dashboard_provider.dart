@@ -48,22 +48,21 @@ final creatorDashboardProvider = FutureProvider.autoDispose<CreatorDashboard>((
 });
 
 /// Le top 5 de `/creators/me/analytics` n'a ni miniature ni revenu : on les
-/// complète depuis la liste des vidéos. Sans top (aucune vue), on prend les
-/// vidéos les plus vues.
+/// complète depuis la liste des vidéos. Il compte aussi les vidéos supprimées
+/// (soft-delete) que la liste écarte : on les retire pour ne pas proposer un
+/// détail introuvable. Sans top exploitable, on prend les vidéos les plus vues.
 List<TopVideo> _topVideos(
   List<TopVideo> fromAnalytics,
   List<VideoWithStats> videos,
 ) {
   final byId = {for (final video in videos) video.id: video};
-  if (fromAnalytics.isNotEmpty) {
-    return [
-      for (final top in fromAnalytics)
-        top.copyWith(
-          revenue: byId[top.videoId]?.revenue,
-          thumbnailUrl: byId[top.videoId]?.thumbnailUrl,
-        ),
-    ];
-  }
+  final enriched = [
+    for (final top in fromAnalytics)
+      if (byId[top.videoId] case final video?)
+        top.copyWith(revenue: video.revenue, thumbnailUrl: video.thumbnailUrl),
+  ];
+  if (enriched.isNotEmpty) return enriched;
+
   final sorted = [...videos]
     ..sort((a, b) => b.viewCount.compareTo(a.viewCount));
   return [

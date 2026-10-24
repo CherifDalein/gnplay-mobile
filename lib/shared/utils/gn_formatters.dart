@@ -1,3 +1,8 @@
+/// Devise utilisée quand l'appelant n'en précise pas (même valeur que
+/// `defaultCountry.currency`, répétée ici car un défaut de paramètre doit être
+/// une constante).
+const _defaultCurrency = 'GNF';
+
 String formatGrouped(int value) {
   final sign = value < 0 ? '-' : '';
   final raw = value.abs().toString();
@@ -11,9 +16,16 @@ String formatGrouped(int value) {
   return '$sign$buffer';
 }
 
-String formatMoney(int amount, {bool withCurrency = true}) {
+/// Montant groupé par milliers, suivi de la devise. [currency] vaut la devise
+/// du pays par défaut (GNF) quand on ne la précise pas : les écrans pas encore
+/// migrés vers `userCurrencyProvider` gardent leur affichage actuel.
+String formatMoney(
+  int amount, {
+  bool withCurrency = true,
+  String currency = _defaultCurrency,
+}) {
   final value = formatGrouped(amount);
-  return withCurrency ? '$value GNF' : value;
+  return withCurrency ? '$value $currency' : value;
 }
 
 String formatCompact(int value) {
