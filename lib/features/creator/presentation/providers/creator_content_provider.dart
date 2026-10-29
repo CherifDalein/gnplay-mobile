@@ -30,20 +30,29 @@ final creatorVideosProvider = FutureProvider.autoDispose<List<VideoWithStats>>((
 });
 
 /// Résout une vidéo par id depuis la liste déjà chargée par
-/// [creatorVideosProvider] — état de chargement/erreur transmis tel quel, et
-/// `null` en cas de succès si la vidéo n'existe plus dans la liste (ex.
-/// supprimée ailleurs). Centralise cette recherche pour éviter de la
-/// dupliquer (avec un faux repli sur des données d'exemple) dans chaque écran.
+/// [creatorVideosProvider]. Pendant un rafraîchissement (tirer pour actualiser,
+/// sondage, retour sur l'écran) la valeur précédente est conservée : l'écran
+/// garde son contenu au lieu de repasser par un chargement plein écran.
+///
+/// - données : la vidéo, ou `null` si elle n'existe plus dans la liste (ex.
+///   supprimée ailleurs) ;
+/// - erreur / chargement : uniquement tant qu'aucune liste n'a été chargée.
+///
+/// Pour savoir si un rafraîchissement a échoué, observer aussi
+/// [creatorVideosProvider] (`hasError && hasValue`).
 final videoByIdProvider = Provider.autoDispose
     .family<AsyncValue<VideoWithStats?>, String>((ref, videoId) {
-      return ref.watch(creatorVideosProvider).whenData((videos) {
+      final state = ref.watch(creatorVideosProvider);
+      final videos = state.valueOrNull;
+      if (videos != null) {
         for (final video in videos) {
-          if (video.id == videoId) {
-            return video;
-          }
+          if (video.id == videoId) return AsyncData(video);
         }
-        return null;
-      });
+        return const AsyncData(null);
+      }
+      return state.hasError
+          ? AsyncError(state.error!, state.stackTrace ?? StackTrace.current)
+          : const AsyncLoading();
     });
 
 final videoAnalyticsProvider = FutureProvider.autoDispose
@@ -51,17 +60,20 @@ final videoAnalyticsProvider = FutureProvider.autoDispose
       return ref.watch(videoRepositoryProvider).loadVideoAnalytics(videoId);
     });
 
+/// Session de lecture de la vidéo complète (`playback-session`, valable 2 h).
+///
 /// L'enregistrement de l'appareil au login (voir AuthController) est
 /// best-effort et non bloquant : s'il n'a pas eu le temps de se terminer
 /// (ou a échoué transitoirement) avant que l'utilisateur ouvre une vidéo,
-/// la session de lecture est refusée avec "device not registered". Plutôt
+/// la session de lecture est refusée avec « device not registered ». Plutôt
 /// que de faire échouer la lecture pour une simple question de timing, on
 /// (ré)enregistre explicitement l'appareil une fois puis on retente.
+///
+/// Rafraîchir ce provider (`ref.refresh`) crée une nouvelle session : c'est
+/// ainsi que le lecteur renouvelle un jeton arrivé à expiration.
 final videoPlaybackAccessProvider = FutureProvider.autoDispose
     .family<VideoPlaybackAccess, String>((ref, videoId) async {
-      final repository = ref.watch(videoRepositoryProvider);
-      final devices = ref.watch(deviceRepositoryProvider);
-      final tokenStorage = ref.watch(tokenStorageProvider);
+      final repository = ref.read(videoRepositoryProvider);
       try {
         return await repository.createPlaybackSession(videoId);
       } on ApiException catch (error) {
@@ -71,17 +83,22 @@ final videoPlaybackAccessProvider = FutureProvider.autoDispose
 
         // Le backend désactive au besoin l'appareil le plus ancien pour faire
         // de la place : l'enregistrement ne bloque plus à 3 appareils.
-        final deviceId = await tokenStorage.readOrCreateDeviceId();
-        await devices.registerDevice(deviceId: deviceId);
+        final deviceId = await ref
+            .read(tokenStorageProvider)
+            .readOrCreateDeviceId();
+        await ref
+            .read(deviceRepositoryProvider)
+            .registerDevice(deviceId: deviceId);
         return repository.createPlaybackSession(videoId);
       }
     });
 
+/// Vidéos dont une action (publication, édition, suppression, relance) est en
+/// cours. Chaque carte lit uniquement son propre identifiant.
 final videoMutationControllerProvider =
-    StateNotifierProvider.autoDispose<
-      VideoMutationController,
-      AsyncValue<void>
-    >((ref) => VideoMutationController(ref));
+    StateNotifierProvider<VideoMutationController, VideoMutationState>(
+      (ref) => VideoMutationController(ref),
+    );
 
 final videoUploadControllerProvider =
     StateNotifierProvider.autoDispose<
@@ -89,59 +106,116 @@ final videoUploadControllerProvider =
       VideoUploadProgress
     >((ref) => VideoUploadController(ref));
 
-class VideoMutationController extends StateNotifier<AsyncValue<void>> {
-  VideoMutationController(this._ref) : super(const AsyncData(null));
+class VideoMutationState {
+  const VideoMutationState({this.busyVideoIds = const {}});
+
+  final Set<String> busyVideoIds;
+
+  bool isBusy(String videoId) => busyVideoIds.contains(videoId);
+}
+
+/// Actions du créateur sur ses vidéos. Chaque méthode lève l'[ApiException] du
+/// serveur en cas d'échec (l'écran choisit où l'afficher : toast, feuille…) et
+/// ignore l'appel (en renvoyant `false`) si la même vidéo est déjà en cours de
+/// modification. Elles renvoient `true` quand l'action a bien été exécutée.
+class VideoMutationController extends StateNotifier<VideoMutationState> {
+  VideoMutationController(this._ref) : super(const VideoMutationState());
 
   final Ref _ref;
 
-  Future<void> setPublished(VideoWithStats video, bool isPublished) async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      await _ref
+  /// Publie ou masque une vidéo prête.
+  Future<bool> setPublished(VideoWithStats video, bool isPublished) {
+    return _run(
+      video.id,
+      () => _ref
           .read(videoRepositoryProvider)
-          .updateVideo(video.id, isPublished: isPublished);
-      _invalidateVideoData(video.id);
-    });
+          .updateVideo(video.id, isPublished: isPublished),
+    );
   }
 
-  Future<void> updateVideo({
+  /// Modifie titre, description et/ou prix (seuls les champs fournis sont
+  /// envoyés).
+  Future<bool> updateDetails({
     required String videoId,
     String? title,
     String? description,
     int? price,
-    String? thumbnailUrl,
-    bool? isPublished,
-  }) async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      await _ref
+  }) {
+    return _run(
+      videoId,
+      () => _ref
           .read(videoRepositoryProvider)
           .updateVideo(
             videoId,
             title: title,
             description: description,
             price: price,
-            thumbnailUrl: thumbnailUrl,
-            isPublished: isPublished,
-          );
-      _invalidateVideoData(videoId);
-    });
+          ),
+    );
   }
 
-  Future<void> deleteVideo(String videoId) async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      await _ref.read(videoRepositoryProvider).deleteVideo(videoId);
-      _invalidateVideoData(videoId);
-    });
+  /// Supprime la vidéo (définitivement si jamais achetée, sinon retrait du
+  /// catalogue). N'attend pas le rechargement de la liste : l'écran de détail
+  /// se ferme aussitôt.
+  Future<bool> deleteVideo(String videoId) {
+    return _run(
+      videoId,
+      () => _ref.read(videoRepositoryProvider).deleteVideo(videoId),
+      waitForList: false,
+    );
   }
 
-  Future<void> retryTranscode(String videoId) async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      await _ref.read(videoRepositoryProvider).retryTranscode(videoId);
+  /// Relance le transcodage d'une vidéo en échec. Un 409 signifie que la
+  /// vidéo n'est plus en échec (liste périmée), un 503 que la mise en file a
+  /// échoué : dans les deux cas la liste est rechargée pour refléter l'état réel.
+  Future<bool> retryTranscode(String videoId) {
+    return _run(
+      videoId,
+      () => _ref.read(videoRepositoryProvider).retryTranscode(videoId),
+      refreshOnFailure: (error) =>
+          error.statusCode == 409 || error.statusCode == 503,
+    );
+  }
+
+  Future<bool> _run(
+    String videoId,
+    Future<void> Function() action, {
+    bool waitForList = true,
+    bool Function(ApiException error)? refreshOnFailure,
+  }) async {
+    if (state.isBusy(videoId)) return false;
+    _setBusy(videoId, true);
+    // L'état « occupé » n'est levé qu'après le rechargement de la liste : la
+    // carte ne retrouve son interrupteur qu'avec les données à jour.
+    try {
+      try {
+        await action();
+      } on ApiException catch (error) {
+        if (mounted && (refreshOnFailure?.call(error) ?? false)) {
+          _invalidateVideoData(videoId);
+        }
+        rethrow;
+      }
+      if (!mounted) return true;
       _invalidateVideoData(videoId);
-    });
+      if (waitForList) {
+        try {
+          await _ref.read(creatorVideosProvider.future);
+        } catch (_) {
+          // Échec du rechargement : l'écran affiche l'erreur d'actualisation.
+        }
+      }
+      return true;
+    } finally {
+      _setBusy(videoId, false);
+    }
+  }
+
+  void _setBusy(String videoId, bool busy) {
+    if (!mounted) return;
+    final ids = {...state.busyVideoIds};
+    busy ? ids.add(videoId) : ids.remove(videoId);
+    state = VideoMutationState(busyVideoIds: ids);
   }
 
   void _invalidateVideoData(String videoId) {

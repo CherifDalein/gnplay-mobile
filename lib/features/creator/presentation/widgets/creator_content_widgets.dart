@@ -223,40 +223,51 @@ class GnCompletionRing extends StatelessWidget {
   Widget build(BuildContext context) {
     final normalized = (percent / 100).clamp(0, 1).toDouble();
 
-    return SizedBox.square(
-      dimension: 170,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          SizedBox.square(
-            dimension: 170,
-            child: CustomPaint(painter: _RingPainter(progress: normalized)),
-          ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '${percent.round()}%',
-                style: AppTextStyles.displayLg.copyWith(
-                  color: AppColors.text1,
-                  fontSize: 34,
-                ),
+    return Semantics(
+      container: true,
+      label: 'Taux de complétion moyen : ${percent.round()} %',
+      excludeSemantics: true,
+      child: SizedBox.square(
+        dimension: 170,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // L'anneau se remplit en 0,7 s à chaque nouvelle valeur.
+            TweenAnimationBuilder<double>(
+              tween: Tween<double>(end: normalized),
+              duration: const Duration(milliseconds: 700),
+              curve: Curves.easeOut,
+              builder: (context, value, _) => SizedBox.square(
+                dimension: 170,
+                child: CustomPaint(painter: _RingPainter(progress: value)),
               ),
-              const SizedBox(height: 6),
-              SizedBox(
-                width: 110,
-                child: Text(
-                  'taux de complétion moyen',
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.micro.copyWith(
-                    color: AppColors.text3,
-                    fontWeight: FontWeight.w500,
+            ),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${percent.round()}%',
+                  style: AppTextStyles.displayLg.copyWith(
+                    color: AppColors.text1,
+                    fontSize: 34,
                   ),
                 ),
-              ),
-            ],
-          ),
-        ],
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: 110,
+                  child: Text(
+                    'taux de complétion moyen',
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.micro.copyWith(
+                      color: AppColors.text3,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -418,16 +429,18 @@ class _RingPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
-    final radius = size.shortestSide / 2 - 9;
+    // Maquette : trait de 11 px sur un anneau de 120 px, ramené à 170 px.
+    const stroke = 15.6;
+    final radius = size.shortestSide / 2 - stroke / 2 - 3.5;
     final track = Paint()
       ..color = AppColors.border1
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 11;
+      ..strokeWidth = stroke;
     final progressPaint = Paint()
       ..color = AppColors.accent500
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 11;
+      ..strokeWidth = stroke;
 
     canvas.drawCircle(center, radius, track);
     canvas.drawArc(

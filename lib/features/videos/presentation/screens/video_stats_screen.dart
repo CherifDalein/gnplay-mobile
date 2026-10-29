@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/locale/currency_provider.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/utils/gn_formatters.dart';
 import '../../../../shared/widgets/design_system/gn_design_system.dart';
@@ -9,58 +10,257 @@ import '../../../creator/domain/video_analytics.dart';
 import '../../../creator/domain/video_with_stats.dart';
 import '../../../creator/presentation/providers/creator_content_provider.dart';
 import '../../../creator/presentation/widgets/creator_content_widgets.dart';
+import '../widgets/video_picker_sheet.dart';
 
-class VideoStatsScreen extends ConsumerWidget {
+/// Statistiques détaillées d'une vidéo.
+///
+/// Le sélecteur « Changer » ouvre la liste des vidéos pour passer de l'une à
+/// l'autre sans repasser par « Mon contenu ». Les chiffres déjà affichés
+/// restent à l'écran pendant un rafraîchissement.
+class VideoStatsScreen extends ConsumerStatefulWidget {
   const VideoStatsScreen({super.key, required this.videoId});
 
   final String videoId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final videoState = ref.watch(videoByIdProvider(videoId));
+  ConsumerState<VideoStatsScreen> createState() => _VideoStatsScreenState();
+}
+
+class _VideoStatsScreenState extends ConsumerState<VideoStatsScreen> {
+  late String _videoId = widget.videoId;
+  bool _pulling = false;
+
+  @override
+  void didUpdateWidget(covariant VideoStatsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoId != widget.videoId) _videoId = widget.videoId;
+  }
+
+  void _goBack() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      context.go('/videos/$_videoId');
+    }
+  }
+
+  Future<void> _reload() {
+    return Future.wait([
+      ref
+          .refresh(creatorVideosProvider.future)
+          .then((_) {}, onError: (Object _) {}),
+      ref
+          .refresh(videoAnalyticsProvider(_videoId).future)
+          .then((_) {}, onError: (Object _) {}),
+    ]);
+  }
+
+  Future<void> _pullToRefresh() async {
+    setState(() => _pulling = true);
+    try {
+      await _reload();
+    } finally {
+      if (mounted) setState(() => _pulling = false);
+    }
+  }
+
+  Future<void> _pickVideo(List<VideoWithStats> videos) async {
+    final chosen = await showVideoPickerSheet(
+      context,
+      videos: videos,
+      selectedId: _videoId,
+    );
+    if (chosen != null && chosen != _videoId && mounted) {
+      setState(() => _videoId = chosen);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final videoState = ref.watch(videoByIdProvider(_videoId));
+    final listState = ref.watch(creatorVideosProvider);
+    final analytics = ref.watch(videoAnalyticsProvider(_videoId));
+    final refreshing =
+        (listState.isLoading && listState.hasValue ||
+            analytics.isLoading && analytics.hasValue) &&
+        !_pulling;
 
     return Scaffold(
       backgroundColor: AppColors.bgApp,
       body: SafeArea(
         bottom: false,
         child: GnAppBackground(
-          child: RefreshIndicator(
-            color: AppColors.accent500,
-            backgroundColor: AppColors.surface1,
-            onRefresh: () async {
-              ref.invalidate(creatorVideosProvider);
-              ref.invalidate(videoAnalyticsProvider(videoId));
-              final future = ref.read(creatorVideosProvider.future);
-              await future;
-            },
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 116),
-              children: [
-                _Header(onBack: () => _goBack(context)),
-                const SizedBox(height: 16),
-                switch (videoState) {
-                  AsyncData(value: final video?) => _StatsContent(
-                    videoId: videoId,
-                    video: video,
-                  ),
-                  AsyncData() => Padding(
-                    padding: const EdgeInsets.only(top: 60),
-                    child: Center(
-                      child: Text(
-                        'Cette vidéo n’existe plus.',
-                        style: AppTextStyles.body.copyWith(
-                          color: AppColors.text2,
+          child: Column(
+            children: [
+              SizedBox(
+                height: 2,
+                child: refreshing
+                    ? const LinearProgressIndicator(
+                        color: AppColors.accent500,
+                        backgroundColor: Colors.transparent,
+                        semanticsLabel: 'Actualisation en cours',
+                      )
+                    : null,
+              ),
+              Expanded(
+                child: RefreshIndicator(
+                  color: AppColors.accent500,
+                  backgroundColor: AppColors.surface1,
+                  onRefresh: _pullToRefresh,
+                  child: CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: GnScreenHeader(
+                          title: 'Statistiques',
+                          onBack: _goBack,
+                          padding: const EdgeInsets.fromLTRB(12, 8, 20, 0),
                         ),
                       ),
+                      ..._slivers(videoState, listState, analytics),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _slivers(
+    AsyncValue<VideoWithStats?> videoState,
+    AsyncValue<List<VideoWithStats>> listState,
+    AsyncValue<VideoAnalytics> analytics,
+  ) {
+    final video = videoState.valueOrNull;
+    if (video == null) {
+      final Widget message;
+      if (videoState.hasValue) {
+        final hasVideos = listState.valueOrNull?.isNotEmpty ?? false;
+        message = GnEmptyView(
+          title: hasVideos
+              ? 'Cette vidéo n’existe plus'
+              : 'Aucune vidéo pour le moment',
+          message: hasVideos
+              ? 'Elle a peut-être été supprimée.'
+              : 'Les statistiques apparaissent dès que vous avez publié une '
+                    'vidéo.',
+          actionLabel: hasVideos ? 'Voir mes vidéos' : 'Publier une vidéo',
+          onAction: () => context.go(hasVideos ? '/videos' : '/publish'),
+        );
+      } else if (videoState.hasError) {
+        message = GnErrorView(
+          message: friendlyErrorMessage(videoState.error!),
+          onRetry: _reload,
+        );
+      } else {
+        message = const GnLoadingView(message: 'Chargement…');
+      }
+      return [SliverFillRemaining(hasScrollBody: false, child: message)];
+    }
+
+    final videos = listState.valueOrNull ?? const <VideoWithStats>[];
+    final currency = ref.watch(userCurrencyProvider);
+    final data = analytics.valueOrNull;
+    final refreshError =
+        analytics.hasError && !analytics.isLoading && data != null
+        ? analytics.error
+        : null;
+
+    return [
+      SliverPadding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 40),
+        sliver: SliverList.list(
+          children: [
+            _VideoPicker(
+              video: video,
+              onChange: videos.length > 1 ? () => _pickVideo(videos) : null,
+            ),
+            const SizedBox(height: 26),
+            if (refreshError != null) ...[
+              GnBanner(
+                tone: GnBannerTone.danger,
+                title: 'Actualisation impossible',
+                message: friendlyErrorMessage(refreshError),
+                actionLabel: 'Réessayer',
+                onAction: _reload,
+              ),
+              const SizedBox(height: 14),
+            ],
+            if (data != null)
+              _StatsContent(analytics: data, currency: currency)
+            else if (analytics.hasError && !analytics.isLoading)
+              GnErrorView(
+                compact: true,
+                message: friendlyErrorMessage(analytics.error!),
+                onRetry: () => ref.invalidate(videoAnalyticsProvider(_videoId)),
+              )
+            else
+              const Padding(
+                padding: EdgeInsets.only(top: 40),
+                child: GnLoadingView(compact: true),
+              ),
+          ],
+        ),
+      ),
+    ];
+  }
+}
+
+/// Bouton h48 avec le titre de la vidéo et « Changer ⌄ » en or.
+class _VideoPicker extends StatelessWidget {
+  const _VideoPicker({required this.video, required this.onChange});
+
+  final VideoWithStats video;
+
+  /// `null` quand il n'y a qu'une vidéo : rien à changer.
+  final VoidCallback? onChange;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        side: const BorderSide(color: AppColors.border1),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onChange,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    video.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyles.label.copyWith(color: AppColors.text1),
+                  ),
+                ),
+                if (onChange != null) ...[
+                  const SizedBox(width: 10),
+                  Text(
+                    'Changer',
+                    style: AppTextStyles.bodyText(
+                      size: 11,
+                      weight: FontWeight.w600,
+                      color: AppColors.accent500,
                     ),
                   ),
-                  AsyncError(:final error) => GnAsyncError(
-                    message: friendlyErrorMessage(error),
-                    onRetry: () => ref.invalidate(creatorVideosProvider),
+                  const SizedBox(width: 4),
+                  const GnLineIcon(
+                    GnLineIconData.chevronDown,
+                    size: 14,
+                    color: AppColors.accent500,
+                    strokeWidth: 2,
                   ),
-                  _ => const GnLoadingState(),
-                },
+                ],
               ],
             ),
           ),
@@ -68,147 +268,71 @@ class VideoStatsScreen extends ConsumerWidget {
       ),
     );
   }
-
-  void _goBack(BuildContext context) {
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    } else {
-      context.go('/videos/$videoId');
-    }
-  }
 }
 
-class _StatsContent extends ConsumerWidget {
-  const _StatsContent({required this.videoId, required this.video});
-
-  final String videoId;
-  final VideoWithStats video;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final analyticsState = ref.watch(videoAnalyticsProvider(videoId));
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _VideoPickerTile(video: video),
-        const SizedBox(height: 28),
-        switch (analyticsState) {
-          AsyncData(:final value) => Column(
-            children: [
-              Center(child: GnCompletionRing(percent: value.completionPercent)),
-              const SizedBox(height: 26),
-              _MetricsTable(analytics: value),
-              const SizedBox(height: 12),
-              Text(
-                'Le revenu affiché est déjà net de la commission de la plateforme.',
-                style: AppTextStyles.caption.copyWith(
-                  color: AppColors.text3,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
-          AsyncError(:final error) => GnAsyncError(
-            message: friendlyErrorMessage(error),
-            onRetry: () => ref.invalidate(videoAnalyticsProvider(videoId)),
-            topPadding: 20,
-          ),
-          _ => const GnLoadingState(topPadding: 40),
-        },
-      ],
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({required this.onBack});
-
-  final VoidCallback onBack;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        IconButton(
-          onPressed: onBack,
-          icon: const Icon(Icons.arrow_back, color: AppColors.text2, size: 20),
-          style: IconButton.styleFrom(
-            padding: EdgeInsets.zero,
-            minimumSize: const Size(32, 32),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Text(
-          'Statistiques',
-          style: AppTextStyles.heading.copyWith(
-            color: AppColors.text1,
-            fontSize: 17,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _VideoPickerTile extends StatelessWidget {
-  const _VideoPickerTile({required this.video});
-
-  final VideoWithStats video;
-
-  @override
-  Widget build(BuildContext context) {
-    return GnCard(
-      radius: 12,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              video.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppTextStyles.label.copyWith(color: AppColors.text1),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MetricsTable extends StatelessWidget {
-  const _MetricsTable({required this.analytics});
+class _StatsContent extends StatelessWidget {
+  const _StatsContent({required this.analytics, required this.currency});
 
   final VideoAnalytics analytics;
+  final String currency;
+
+  bool get _noActivity =>
+      analytics.views == 0 &&
+      analytics.purchasesCount == 0 &&
+      analytics.likesCount == 0;
 
   @override
   Widget build(BuildContext context) {
     final rows = [
-      _MetricRow('Vues', formatGrouped(analytics.views)),
-      _MetricRow('Spectateurs uniques', formatGrouped(analytics.uniqueViewers)),
-      _MetricRow('Vues complètes', formatGrouped(analytics.completedViews)),
-      _MetricRow('Likes', formatGrouped(analytics.likesCount)),
-      _MetricRow('Achats', formatGrouped(analytics.purchasesCount)),
-      _MetricRow('Revenu', formatMoney(analytics.revenue), AppColors.accent300),
+      _Row('Vues totales', formatGrouped(analytics.views)),
+      _Row('Spectateurs uniques', formatGrouped(analytics.uniqueViewers)),
+      _Row('Vues complétées', formatGrouped(analytics.completedViews)),
+      _Row('Likes', formatGrouped(analytics.likesCount)),
+      _Row('Nombre d’achats', formatGrouped(analytics.purchasesCount)),
+      _Row(
+        'Revenu net (part créateur)',
+        formatMoney(analytics.revenue, currency: currency),
+        AppColors.accent300,
+      ),
     ];
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: AppColors.surface1,
-          border: Border.all(color: AppColors.border1),
-          borderRadius: BorderRadius.circular(AppRadii.lg),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_noActivity) ...[
+          const GnBanner(
+            message:
+                'Pas encore de statistiques : elles apparaissent dès que '
+                'vos spectateurs regardent ou achètent la vidéo.',
+          ),
+          const SizedBox(height: 18),
+        ],
+        Center(child: GnCompletionRing(percent: analytics.completionPercent)),
+        const SizedBox(height: 26),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: AppColors.surface1,
+            border: Border.all(color: AppColors.border1),
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+          ),
+          child: Column(
+            children: [
+              for (var i = 0; i < rows.length; i++)
+                _TableLine(row: rows[i], showDivider: i < rows.length - 1),
+            ],
+          ),
         ),
-        child: Column(
-          children: [
-            for (var i = 0; i < rows.length; i++)
-              _TableLine(row: rows[i], showDivider: i < rows.length - 1),
-          ],
+        const SizedBox(height: 12),
+        Text(
+          'Les vues comptent les lectures de vos spectateurs : vos propres '
+          'visionnages ne sont pas comptés. Le revenu affiché est déjà net '
+          'de la commission de la plateforme.',
+          style: AppTextStyles.caption.copyWith(
+            color: AppColors.text3,
+            fontSize: 11,
+          ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -216,7 +340,7 @@ class _MetricsTable extends StatelessWidget {
 class _TableLine extends StatelessWidget {
   const _TableLine({required this.row, required this.showDivider});
 
-  final _MetricRow row;
+  final _Row row;
   final bool showDivider;
 
   @override
@@ -240,11 +364,20 @@ class _TableLine extends StatelessWidget {
                 ),
               ),
             ),
-            Text(
-              row.value,
-              style: AppTextStyles.label.copyWith(
-                color: row.color,
-                fontSize: 14,
+            const SizedBox(width: 10),
+            // Un grand montant rétrécit au lieu de déborder.
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  row.value,
+                  maxLines: 1,
+                  style: AppTextStyles.label.copyWith(
+                    color: row.color,
+                    fontSize: 14,
+                  ),
+                ),
               ),
             ),
           ],
@@ -254,8 +387,8 @@ class _TableLine extends StatelessWidget {
   }
 }
 
-class _MetricRow {
-  const _MetricRow(this.label, this.value, [this.color = AppColors.text1]);
+class _Row {
+  const _Row(this.label, this.value, [this.color = AppColors.text1]);
 
   final String label;
   final String value;

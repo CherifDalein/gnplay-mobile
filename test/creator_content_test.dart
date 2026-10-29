@@ -10,6 +10,7 @@ import 'package:gnplay/features/publish/presentation/screens/publish_screen.dart
 import 'package:gnplay/features/videos/presentation/screens/video_detail_screen.dart';
 import 'package:gnplay/features/videos/presentation/screens/video_stats_screen.dart';
 import 'package:gnplay/features/videos/presentation/screens/videos_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
@@ -17,6 +18,8 @@ const _sampleVideoId = 'video-1';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  // Aucun accès réseau dans les tests : pas de téléchargement des polices.
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({
@@ -25,33 +28,39 @@ void main() {
     });
   });
 
-  testWidgets('creator content screens mount with real API responses', (
+  testWidgets('la liste « Mon contenu » monte avec une vraie réponse', (
     tester,
   ) async {
     await tester.pumpWidget(_wrap(const VideosScreen()));
     await tester.pump();
     expect(find.text('Mon contenu'), findsOneWidget);
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.text('Nuits de Conakry — épisode 3'), findsOneWidget);
+  });
 
+  testWidgets('l\'écran Publier monte', (tester) async {
     await tester.pumpWidget(_wrap(const PublishScreen()));
     await tester.pump();
     expect(find.text('Nouvelle vidéo'), findsOneWidget);
     expect(find.text('Choisir une vidéo'), findsOneWidget);
+  });
 
+  testWidgets('le détail monte avec une vraie réponse', (tester) async {
     await tester.pumpWidget(
       _wrap(const VideoDetailScreen(videoId: _sampleVideoId)),
     );
-    await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.text('Modifier'), findsOneWidget);
     expect(find.text('Nuits de Conakry — épisode 3'), findsOneWidget);
+  });
 
+  testWidgets('les statistiques montent avec une vraie réponse', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       _wrap(const VideoStatsScreen(videoId: _sampleVideoId)),
     );
-    await tester.pump();
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.text('Statistiques'), findsOneWidget);
     expect(find.text('taux de complétion moyen'), findsOneWidget);
   });

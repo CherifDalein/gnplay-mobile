@@ -41,6 +41,10 @@ class VideoWithStats {
 
   bool get isFailed => lifecycle == VideoLifecycle.failed;
 
+  /// Le serveur est en train de préparer la vidéo (file d'attente ou
+  /// transcodage) : son statut évolue seul, sans action du créateur.
+  bool get isTranscoding => lifecycle == VideoLifecycle.processing;
+
   /// Envoi ou traitement en cours (rien à faire, il faut attendre).
   bool get isProcessing =>
       lifecycle == VideoLifecycle.processing ||
@@ -60,6 +64,13 @@ class VideoWithStats {
   bool get canTogglePublish => isReady;
 
   String get statusLabel => lifecycle.label;
+
+  /// Un aperçu de 15 secondes a été généré (aucune vidéo n'en a tant que le
+  /// worker serveur ne l'a pas produit).
+  bool get hasPreview => previewUrl != null && previewUrl!.isNotEmpty;
+
+  /// La durée est connue (elle vaut 0 tant que le traitement n'est pas fini).
+  bool get hasDuration => duration > 0;
 
   factory VideoWithStats.fromJson(Map<String, dynamic> json) {
     final isPublished = jsonBool(json['is_published']);

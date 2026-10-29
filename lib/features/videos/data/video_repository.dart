@@ -4,6 +4,7 @@ import '../../../shared/utils/json_helpers.dart';
 import '../../auth/data/token_storage.dart';
 import '../../creator/domain/video_analytics.dart';
 import '../../creator/domain/video_playback_access.dart';
+import '../../creator/domain/video_preview_generation.dart';
 import '../../creator/domain/video_upload_init_response.dart';
 import '../../creator/domain/video_with_stats.dart';
 
@@ -32,12 +33,13 @@ class VideoRepository {
     return all;
   }
 
+  /// Modifie titre, description, prix et/ou publication (seuls les champs
+  /// fournis sont envoyés). Le serveur n'a pas de route d'envoi de miniature.
   Future<VideoWithStats> updateVideo(
     String videoId, {
     String? title,
     String? description,
     int? price,
-    String? thumbnailUrl,
     bool? isPublished,
   }) async {
     final json = await _api.patch(
@@ -46,7 +48,6 @@ class VideoRepository {
         if (title != null) 'title': title,
         if (description != null) 'description': description,
         if (price != null) 'price': price,
-        if (thumbnailUrl != null) 'thumbnail_url': thumbnailUrl,
         if (isPublished != null) 'is_published': isPublished,
       },
     );
@@ -99,5 +100,13 @@ class VideoRepository {
   Future<ProcessingStatusResponse> getProcessingStatus(String videoId) async {
     final json = await _api.get('/api/v1/videos/$videoId/processing-status');
     return ProcessingStatusResponse.fromJson(json.asObject);
+  }
+
+  /// Demande la création de l'aperçu de 15 s (`POST /videos/{id}/preview`).
+  /// 200 : l'aperçu existe déjà ; 202 : génération lancée, à suivre en relisant
+  /// la vidéo ; 409 : la vidéo n'est pas encore prête.
+  Future<PreviewGeneration> generatePreview(String videoId) async {
+    final json = await _api.post('/api/v1/videos/$videoId/preview');
+    return PreviewGeneration.fromJson(json.asObject);
   }
 }
